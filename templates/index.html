@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}홈 · Naver Shopping Buy Guide{% endblock %}
+
+{% block content %}
+<section class="summary-band">
+  <div>
+    <p class="eyebrow">네이버쇼핑 구매 가이드</p>
+    <h1>가격 추이와 스펙을 함께 보고 구매 타이밍을 판단합니다.</h1>
+  </div>
+  <div class="summary-grid">
+    <div class="metric">
+      <span>카테고리</span>
+      <strong>{{ counts.categories }}</strong>
+    </div>
+    <div class="metric">
+      <span>상품</span>
+      <strong>{{ counts.products }}</strong>
+    </div>
+    <div class="metric">
+      <span>리포트</span>
+      <strong>{{ counts.reports }}</strong>
+    </div>
+  </div>
+</section>
+
+<section class="search-band">
+  <form class="search-form" method="get" action="{{ url_for('search_page') }}">
+    <label for="q">
+      <span class="eyebrow">Search</span>
+      <strong>분석할 상품 검색</strong>
+    </label>
+    <div class="search-control">
+      <input id="q" name="q" type="search" placeholder="예: 무선이어폰, 노트북, 아이폰" required>
+      <button type="submit">
+        <i data-lucide="search"></i>
+        <span>검색</span>
+      </button>
+    </div>
+  </form>
+</section>
+
+<section class="panel hot-panel" data-hot-carousel>
+  <div class="section-title">
+    <div>
+      <p class="eyebrow">Hot Today</p>
+      <h2>오늘의 핫상품</h2>
+      <p class="muted">네이버 공식 API 검색 순위와 본품 분류 점수를 기반으로 자동 갱신됩니다.</p>
+    </div>
+    <div class="carousel-controls">
+      <button type="button" class="ghost-icon" data-hot-prev title="이전"><i data-lucide="chevron-left"></i></button>
+      <button type="button" class="ghost-icon" data-hot-next title="다음"><i data-lucide="chevron-right"></i></button>
+    </div>
+  </div>
+  {% if hot_products %}
+  <div class="hot-carousel">
+    {% for product in hot_products %}
+    <article class="hot-card {% if loop.first %}active{% endif %}" data-hot-card>
+      <div class="hot-image">
+        {% if product.image_url %}
+          <img src="{{ product.image_url }}" alt="{{ product.name }}">
+        {% else %}
+          <span>{{ product.name[:1] }}</span>
+        {% endif %}
+      </div>
+      <div class="hot-content">
+        <span class="badge">Hot {{ product.hot_score or 0 }}</span>
+        <h3>{{ product.name }}</h3>
+        <p>{{ product.hot_reason or "최근 수집 데이터 기반 추천 상품입니다." }}</p>
+        <strong>{{ product.latest_price|money }}</strong>
+        <div class="score-pills">
+          <span>{{ product.search_query or product.category_name }}</span>
+          <span>{{ product.product_type or "main_product" }}</span>
+          <span>분류 {{ product.classification_score or 0 }}</span>
+        </div>
+        <form method="post" action="{{ url_for('analyze_form') }}">
+          <input type="hidden" name="product_id" value="{{ product.id }}">
+          <button class="primary-action compact" type="submit">
+            <i data-lucide="chart-no-axes-combined"></i>
+            <span>상품 분석</span>
+          </button>
+        </form>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  <div class="carousel-dots" aria-label="핫상품 순서">
+    {% for product in hot_products %}
+    <button type="button" class="{% if loop.first %}active{% endif %}" data-hot-dot="{{ loop.index0 }}" aria-label="{{ loop.index }}번째 핫상품"></button>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">아직 핫상품 데이터가 없습니다. 관리자 화면에서 가격 수집을 실행해보세요.</p>
+  {% endif %}
+</section>
+
+<section class="content-grid">
+  <div class="panel wide">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Categories</p>
+        <h2>카테고리 선택</h2>
+      </div>
+    </div>
+    <div class="category-list">
+      {% for category in categories %}
+      <a class="category-row" href="{{ url_for('category_page', category_id=category.id) }}">
+        <span class="category-icon"><i data-lucide="headphones"></i></span>
+        <span>
+          <strong>{{ category.name }}</strong>
+          <small>{{ category.product_count }}개 상품 등록</small>
+        </span>
+        <i data-lucide="chevron-right"></i>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Best Picks</p>
+        <h2>오늘의 추천</h2>
+      </div>
+    </div>
+    {% for category in categories %}
+      {% set recommendation = recommendations.get(category.id) %}
+      {% if recommendation %}
+      <div class="pick-stack">
+        <p class="muted">{{ category.name }}</p>
+        <div class="pick-row">
+          <span class="badge">가성비</span>
+          <strong>{{ recommendation.best_value_name }}</strong>
+        </div>
+        <p>{{ recommendation.best_value_reason }}</p>
+        <div class="pick-row">
+          <span class="badge dark">성능</span>
+          <strong>{{ recommendation.best_performance_name }}</strong>
+        </div>
+        <p>{{ recommendation.best_performance_reason }}</p>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  <div class="panel">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Reports</p>
+        <h2>최근 리포트</h2>
+      </div>
+    </div>
+    {% if recent_reports %}
+      <div class="compact-list">
+      {% for report in recent_reports %}
+        <a href="{{ url_for('report_page', report_id=report.id) }}">
+          <strong>{{ report.category_name }}</strong>
+          <small>{{ report.user_priority or "균형" }} · {{ report.created_at }}</small>
+        </a>
+      {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">아직 생성된 비교 리포트가 없습니다.</p>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

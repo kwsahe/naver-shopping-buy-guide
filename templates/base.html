@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Naver Shopping Buy Guide{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+    {% block head %}{% endblock %}
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="{{ url_for('index') }}">
+        <span class="brand-mark">N</span>
+        <span>Buy Guide</span>
+      </a>
+      <nav class="desktop-nav" aria-label="주요 메뉴">
+        <a href="{{ url_for('index') }}">홈</a>
+        <a href="{{ url_for('admin_dashboard') }}">관리자</a>
+        <a href="{{ url_for('health') }}">상태</a>
+      </nav>
+    </header>
+
+    <main class="page-shell">
+      {% block content %}{% endblock %}
+    </main>
+
+    <nav class="bottom-nav" aria-label="모바일 메뉴">
+      <a href="{{ url_for('index') }}"><i data-lucide="home"></i><span>홈</span></a>
+      <a href="{{ url_for('admin_dashboard') }}"><i data-lucide="activity"></i><span>관리</span></a>
+      <a href="{{ url_for('health') }}"><i data-lucide="heart-pulse"></i><span>상태</span></a>
+    </nav>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>
+

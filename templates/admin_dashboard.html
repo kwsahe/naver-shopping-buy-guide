@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}관리자 · Naver Shopping Buy Guide{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">Admin</p>
+    <h1>파이프라인 관찰성</h1>
+  </div>
+  <form method="post" action="{{ url_for('api_collect') }}">
+    <button class="icon-button" type="submit">
+      <i data-lucide="play"></i>
+      <span>가격 수집</span>
+    </button>
+  </form>
+</section>
+
+<section class="content-grid">
+  <div class="panel">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">API</p>
+        <h2>네이버 연결</h2>
+      </div>
+    </div>
+    <button class="primary-action compact" type="button" data-api-status>
+      <i data-lucide="plug-zap"></i>
+      <span>연결 확인</span>
+    </button>
+    <pre class="query-result" data-api-status-result></pre>
+  </div>
+
+  <div class="panel wide">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Runs</p>
+        <h2>최근 실행 이력</h2>
+      </div>
+    </div>
+    <div class="run-list">
+      {% for run in runs %}
+      <div class="run-row">
+        <span class="status-dot {{ run.status }}"></span>
+        <span>
+          <strong>{{ run.run_type }}</strong>
+          <small>{{ run.started_at }} · {{ run.items_processed or 0 }}건</small>
+          {% if run.error_message %}<small class="danger">{{ run.error_message }}</small>{% endif %}
+        </span>
+      </div>
+      {% else %}
+      <p class="muted">아직 실행 이력이 없습니다.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">DB Coder</p>
+        <h2>읽기 전용 질의</h2>
+      </div>
+    </div>
+    <form class="query-form" data-admin-query>
+      <textarea name="question" rows="4" placeholder="예: 가격이 낮은 상품을 보여줘"></textarea>
+      <button class="primary-action" type="submit">
+        <i data-lucide="database"></i>
+        <span>질의 실행</span>
+      </button>
+    </form>
+    <pre class="query-result" data-query-result></pre>
+  </div>
+
+  <div class="panel">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Alerts</p>
+        <h2>가격 알림</h2>
+      </div>
+    </div>
+    <form data-alert-check>
+      <button class="primary-action compact" type="submit">
+        <i data-lucide="bell-ring"></i>
+        <span>즉시 점검</span>
+      </button>
+    </form>
+    <div class="compact-list">
+      {% for alert in alerts %}
+      <span>
+        <strong>{{ alert.product_name }}</strong>
+        <small>목표 {{ alert.target_price|money }} · 현재 {{ alert.latest_price|money }} · {% if alert.triggered %}발동{% else %}대기{% endif %}</small>
+      </span>
+      {% else %}
+      <p class="muted">등록된 알림이 없습니다.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Triggered</p>
+        <h2>발동 이력</h2>
+      </div>
+    </div>
+    <div class="compact-list">
+      {% for event in alert_events %}
+      <span>
+        <strong>{{ event.product_name }}</strong>
+        <small>{{ event.message }}</small>
+      </span>
+      {% else %}
+      <p class="muted">아직 발동된 알림이 없습니다.</p>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Feedback</p>
+        <h2>피드백 요약</h2>
+      </div>
+    </div>
+    <div class="compact-list">
+      {% for item in feedback_summary %}
+      <span>
+        <strong>{{ item.target_type }}</strong>
+        <small>도움됨 {{ item.helpful_count or 0 }} · 아쉬움 {{ item.not_helpful_count or 0 }} · 총 {{ item.total_count }}</small>
+      </span>
+      {% else %}
+      <p class="muted">아직 피드백이 없습니다.</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock %}

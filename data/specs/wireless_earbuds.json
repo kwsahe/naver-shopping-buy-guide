@@ -1,0 +1,92 @@
+{
+  "category": "무선 이어폰",
+  "score_weights": {
+    "battery_hours": {"weight": 0.35, "direction": "higher_better"},
+    "anc": {"weight": 0.25, "direction": "boolean_bonus"},
+    "weight_g": {"weight": 0.2, "direction": "lower_better"},
+    "water_resistance_score": {"weight": 0.2, "direction": "higher_better"}
+  },
+  "products": [
+    {
+      "product_id": "demo-earbuds-airlite",
+      "name": "AirLite Buds S",
+      "brand": "Auralab",
+      "maker": "Auralab",
+      "mall_name": "Demo Mall",
+      "link": "https://search.shopping.naver.com/search/all?query=AirLite%20Buds%20S",
+      "image_url": "",
+      "base_price": 89000,
+      "battery_hours": 8.0,
+      "anc": true,
+      "weight_g": 5.2,
+      "water_resistance_score": 4,
+      "source": "제조사 공식 페이지 데모 데이터",
+      "curated_at": "2026-07-11"
+    },
+    {
+      "product_id": "demo-earbuds-balance",
+      "name": "Balance Fit Neo",
+      "brand": "SoundPeak",
+      "maker": "SoundPeak",
+      "mall_name": "Demo Mall",
+      "link": "https://search.shopping.naver.com/search/all?query=Balance%20Fit%20Neo",
+      "image_url": "",
+      "base_price": 65000,
+      "battery_hours": 6.0,
+      "anc": false,
+      "weight_g": 4.8,
+      "water_resistance_score": 4,
+      "source": "제조사 공식 페이지 데모 데이터",
+      "curated_at": "2026-07-11"
+    },
+    {
+      "product_id": "demo-earbuds-maxclear",
+      "name": "MaxClear ANC Pro",
+      "brand": "ClearTone",
+      "maker": "ClearTone",
+      "mall_name": "Demo Mall",
+      "link": "https://search.shopping.naver.com/search/all?query=MaxClear%20ANC%20Pro",
+      "image_url": "",
+      "base_price": 129000,
+      "battery_hours": 10.0,
+      "anc": true,
+      "weight_g": 5.8,
+      "water_resistance_score": 5,
+      "source": "제조사 공식 페이지 데모 데이터",
+      "curated_at": "2026-07-11"
+    },
+    {
+      "product_id": "demo-earbuds-pocket",
+      "name": "Pocket Tune Mini",
+      "brand": "LiteWave",
+      "maker": "LiteWave",
+      "mall_name": "Demo Mall",
+      "link": "https://search.shopping.naver.com/search/all?query=Pocket%20Tune%20Mini",
+      "image_url": "",
+      "base_price": 49000,
+      "battery_hours": 5.5,
+      "anc": false,
+      "weight_g": 3.9,
+      "water_resistance_score": 3,
+      "source": "제조사 공식 페이지 데모 데이터",
+      "curated_at": "2026-07-11"
+    },
+    {
+      "product_id": "demo-earbuds-studio",
+      "name": "Studio Move X",
+      "brand": "NorthAudio",
+      "maker": "NorthAudio",
+      "mall_name": "Demo Mall",
+      "link": "https://search.shopping.naver.com/search/all?query=Studio%20Move%20X",
+      "image_url": "",
+      "base_price": 99000,
+      "battery_hours": 7.5,
+      "anc": true,
+      "weight_g": 5.0,
+      "water_resistance_score": 4,
+      "source": "제조사 공식 페이지 데모 데이터",
+      "curated_at": "2026-07-11"
+    }
+  ]
+}
+

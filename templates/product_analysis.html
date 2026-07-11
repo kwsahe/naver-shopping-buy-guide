@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}상품 분석 · Naver Shopping Buy Guide{% endblock %}
+
+{% block content %}
+{% set selected = result.selected_product %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">Product Analysis</p>
+    <h1>상품 분석</h1>
+    <p class="muted">{{ result.summary }}</p>
+  </div>
+  <a class="icon-button" href="{{ url_for('search_page', q=report.category_name) }}">
+    <i data-lucide="search"></i>
+    <span>다시 검색</span>
+  </a>
+</section>
+
+<section class="content-grid">
+  <div class="panel">
+    <div class="detail-image">
+      {% if selected.image_url %}
+        <img src="{{ selected.image_url }}" alt="{{ selected.name }}">
+      {% else %}
+        <span>{{ selected.name[:1] }}</span>
+      {% endif %}
+    </div>
+    <span class="badge">선택 상품 · {{ selected.selected_score }}점</span>
+    <h2>{{ selected.name }}</h2>
+    <p>{{ selected.description }}</p>
+    <p><strong>{{ selected.latest_price|money }}</strong></p>
+  </div>
+
+  <div class="panel wide">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Recommendations</p>
+        <h2>AI 비교상품 추천</h2>
+      </div>
+      <span class="badge dark">LLM 보류 · 코드 분석</span>
+    </div>
+    <div class="analysis-list">
+      {% for product in result.recommendations %}
+      <article class="analysis-row">
+        <div class="rank-badge">{{ loop.index }}</div>
+        <div class="mini-thumb">
+          {% if product.image_url %}
+            <img src="{{ product.image_url }}" alt="{{ product.name }}">
+          {% else %}
+            <span>{{ product.name[:1] }}</span>
+          {% endif %}
+        </div>
+        <div>
+          <h3>{{ product.name }}</h3>
+          <p>{{ product.recommendation_reason }}</p>
+          <div class="score-pills">
+            <span>추천 {{ product.recommendation_score }}</span>
+            <span>상품명 {{ product.name_similarity_score }}</span>
+            <span>가격대 {{ product.price_similarity_score }}</span>
+            <span>가격매력 {{ product.price_value_score }}</span>
+          </div>
+          <strong>{{ product.latest_price|money }}</strong>
+        </div>
+      </article>
+      {% else %}
+      <p class="muted">비교 후보가 없습니다. 검색 결과를 더 수집한 뒤 다시 분석하세요.</p>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-title">
+    <div>
+      <p class="eyebrow">Scoring</p>
+      <h2>점수 기준</h2>
+    </div>
+  </div>
+  <div class="score-table">
+    <div class="score-head three"><span>기준</span><span>가중치</span><span>설명</span></div>
+    {% for criterion in result.scoring_criteria %}
+    <div class="score-row three">
+      <span>{{ criterion.name }}</span>
+      <span>{{ criterion.weight }}%</span>
+      <span>{{ criterion.description }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="feedback-row">
+    <button class="ghost-button" data-feedback data-target-type="comparison_report" data-target-id="{{ report.id }}" data-helpful="true">도움됐어요 👍</button>
+    <button class="ghost-button" data-feedback data-target-type="comparison_report" data-target-id="{{ report.id }}" data-helpful="false">아니요 👎</button>
+  </div>
+</section>
+{% endblock %}
+

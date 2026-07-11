@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}{{ product.name }} · Naver Shopping Buy Guide{% endblock %}
+{% block head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">{{ product.category_name }}</p>
+    <h1>{{ product.name }}</h1>
+    <p class="muted">{{ product.brand or product.maker or "브랜드 확인 불가" }} · {{ product.mall_name or "판매처 확인 불가" }}</p>
+  </div>
+  <a class="icon-button" href="{{ product.link }}" target="_blank" rel="noreferrer">
+    <i data-lucide="external-link"></i>
+    <span>네이버</span>
+  </a>
+</section>
+
+<section class="content-grid">
+  <div class="panel">
+    <div class="detail-image">
+      {% if product.image_url %}
+        <img src="{{ product.image_url }}" alt="{{ product.name }}">
+      {% else %}
+        <span>{{ product.name[:1] }}</span>
+      {% endif %}
+    </div>
+    <p>{{ product.description or "상품 설명은 아직 수집되지 않았습니다. 네이버 API 수집 후 자동으로 채워집니다." }}</p>
+  </div>
+
+  <div class="panel wide">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Price</p>
+        <h2>최근 90일 가격 추이</h2>
+      </div>
+      <strong>{{ stats.current_price|money }}</strong>
+    </div>
+    <canvas id="priceChart" height="120" data-history='{{ history|json_attr }}'></canvas>
+  </div>
+
+  <div class="panel">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Timing</p>
+        <h2>매수 타이밍</h2>
+      </div>
+      <span class="badge">{{ timing.verdict }}</span>
+    </div>
+    <p>{{ timing.reason }}</p>
+    <dl class="stat-list">
+      <div><dt>최저가</dt><dd>{{ stats.min_price|money }}</dd></div>
+      <div><dt>평균가</dt><dd>{{ stats.avg_price|money }}</dd></div>
+      <div><dt>최고가</dt><dd>{{ stats.max_price|money }}</dd></div>
+      <div><dt>백분위</dt><dd>{{ stats.percentile_rank }}%</dd></div>
+    </dl>
+    <div class="feedback-row">
+      <button class="ghost-button" data-feedback data-target-type="buy_timing" data-target-id="{{ product.id }}" data-helpful="true">도움됐어요 👍</button>
+      <button class="ghost-button" data-feedback data-target-type="buy_timing" data-target-id="{{ product.id }}" data-helpful="false">아니요 👎</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="section-title">
+      <div>
+        <p class="eyebrow">Alert</p>
+        <h2>목표가 알림</h2>
+      </div>
+    </div>
+    <form class="query-form" method="post" action="{{ url_for('alert_form') }}">
+      <input type="hidden" name="product_id" value="{{ product.id }}">
+      <label class="field-label" for="target_price">목표가</label>
+      <input class="input" id="target_price" name="target_price" type="number" min="1" step="100" value="{{ stats.current_price }}" required>
+      <button class="primary-action" type="submit">
+        <i data-lucide="bell"></i>
+        <span>알림 등록</span>
+      </button>
+    </form>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-title">
+    <div>
+      <p class="eyebrow">Specs</p>
+      <h2>큐레이션 스펙</h2>
+    </div>
+  </div>
+  <div class="spec-grid">
+    {% for key, value in product.items() %}
+      {% if key in ["battery_hours", "anc", "weight_g", "water_resistance_score"] %}
+      <div>
+        <span>{{ key }}</span>
+        <strong>{{ value }}</strong>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
