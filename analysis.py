@@ -8,6 +8,118 @@ import db
 
 TOKEN_RE = re.compile(r"[0-9A-Za-z가-힣]+")
 
+SKIN_CONDITION_RULES: dict[str, dict[str, Any]] = {
+    "pore_wide": {
+        "label": "넓어 보이는 모공",
+        "keywords": ("넓은 모공", "모공", "포어"),
+    },
+    "pore_clogged": {
+        "label": "막힌 모공",
+        "keywords": ("막힌 모공", "모공 막힘", "블랙헤드", "화이트헤드", "노폐물"),
+    },
+    "oiliness": {
+        "label": "피지·유분",
+        "keywords": ("피지", "유분", "번들", "지성", "오일프리", "세범", "산뜻"),
+    },
+    "dry_tight": {
+        "label": "건조·당김",
+        "keywords": ("건조", "당김", "보습", "수분", "촉촉", "히알루론산", "세라마이드"),
+    },
+    "sensitive_redness": {
+        "label": "민감·붉음",
+        "keywords": ("민감", "붉", "홍조", "진정", "저자극", "순한", "시카", "판테놀"),
+    },
+    "trouble_acne": {
+        "label": "트러블·여드름",
+        "keywords": ("트러블", "여드름", "아크네", "티트리", "살리실산", "bha", "바하"),
+    },
+    "flaky": {
+        "label": "각질",
+        "keywords": ("각질", "필링", "스크럽", "aha", "아하", "pha", "파하", "효소"),
+    },
+    "pigmentation_dullness": {
+        "label": "색소·칙칙함",
+        "keywords": (
+            "색소",
+            "잡티",
+            "칙칙",
+            "미백",
+            "브라이트닝",
+            "비타민c",
+            "나이아신아마이드",
+            "톤업",
+        ),
+    },
+}
+
+SKIN_PRODUCT_CATEGORIES = (
+    "바디워시",
+    "로션",
+    "폼클렌징",
+    "폼클렌저",
+    "bodywash",
+    "body wash",
+    "lotion",
+    "cleansing",
+)
+
+
+def apply_skin_condition_scores(
+    recommendations: list[dict[str, Any]],
+    skin_conditions: list[str],
+    *,
+    require_condition_match: bool = False,
+) -> list[dict[str, Any]]:
+    """상품명·설명에서 확인된 피부 상태 표현만 추천 점수와 사유에 반영합니다."""
+    if not skin_conditions:
+        return recommendations
+
+    scored: list[dict[str, Any]] = []
+    for recommendation in recommendations:
+        category_name = str(recommendation.get("category_name") or "").lower()
+        is_skin_product = any(category in category_name for category in SKIN_PRODUCT_CATEGORIES)
+        text = " ".join(
+            (
+                str(recommendation.get("name") or ""),
+                str(recommendation.get("description") or ""),
+            )
+        ).lower()
+        condition_score = 0.0
+        condition_reasons: list[str] = []
+
+        if is_skin_product:
+            for condition in skin_conditions:
+                rule = SKIN_CONDITION_RULES[condition]
+                matches = list(dict.fromkeys(keyword for keyword in rule["keywords"] if keyword in text))
+                if not matches:
+                    continue
+                condition_score += len(matches) * 1.5
+                condition_reasons.append(
+                    f"{rule['label']} 관련 표현이 확인됨: {', '.join(matches)}"
+                )
+
+        if require_condition_match and not condition_reasons:
+            continue
+
+        enriched = dict(recommendation)
+        enriched["recommend_score"] = round(
+            float(enriched.get("recommend_score") or 0) + condition_score,
+            2,
+        )
+        enriched["recommend_reasons"] = [
+            *list(enriched.get("recommend_reasons") or []),
+            *condition_reasons,
+        ]
+        scored.append(enriched)
+
+    return sorted(
+        scored,
+        key=lambda item: (
+            -float(item.get("recommend_score") or 0),
+            item.get("latest_price") or float("inf"),
+        ),
+    )
+
 
 def calculate_price_statistics(history: list[dict[str, Any]] | list[int]) -> dict[str, Any]:
     prices = [int(item["price"]) if isinstance(item, dict) else int(item) for item in history]
@@ -119,7 +231,7 @@ def calculate_product_scores(
     if not products:
         return []
     if not score_weights:
-        raise ValueError("score_weights is required")
+        raise ValueError("score_weights가 필요합니다.")
 
     normalized_by_key: dict[str, list[float]] = {}
     for spec_key, config in score_weights.items():
@@ -194,7 +306,7 @@ def _normalize_price_expensiveness(prices: list[float]) -> list[float]:
 def compute_category_scores(category_id: int) -> dict[str, Any]:
     category = db.get_category(category_id)
     if not category:
-        raise ValueError(f"category {category_id} not found")
+        raise ValueError(f"category {category_id}를 찾을 수 없습니다.")
 
     score_weights = load_score_weights(category["name"])
     products = []
@@ -225,7 +337,7 @@ def compute_category_scores(category_id: int) -> dict[str, Any]:
 def analyze_selected_product(product_id: int, limit: int = 5) -> dict[str, Any]:
     selected = db.get_product_with_specs(product_id)
     if not selected:
-        raise ValueError(f"product {product_id} not found")
+        raise ValueError(f"product {product_id}를 찾을 수 없습니다.")
 
     products = [
         product
@@ -237,6 +349,7 @@ def analyze_selected_product(product_id: int, limit: int = 5) -> dict[str, Any]:
         return {
             "selected_product": selected,
             "recommendations": [],
+            "similarity_breakdown": [],
             "ranking": [selected["name"]],
             "summary": "비교할 후보 상품이 아직 없습니다. 검색 결과를 더 수집한 뒤 다시 분석하세요.",
             "scoring_criteria": _analysis_criteria(),
@@ -273,6 +386,14 @@ def analyze_selected_product(product_id: int, limit: int = 5) -> dict[str, Any]:
     return {
         "selected_product": {**selected, "selected_score": selected_score},
         "recommendations": top_recommendations,
+        "similarity_breakdown": [
+            {
+                "product_id": item["id"],
+                "product_name": item["name"],
+                **item["similarity_breakdown"],
+            }
+            for item in top_recommendations
+        ],
         "ranking": ranking,
         "summary": summary,
         "scoring_criteria": _analysis_criteria(),
@@ -314,6 +435,11 @@ def _score_comparison_candidates(
         enriched["price_similarity_score"] = round(price_similarity, 2)
         enriched["price_value_score"] = round(price_value, 2)
         enriched["brand_match_score"] = round(brand_score, 2)
+        enriched["similarity_breakdown"] = {
+            "name": round(name_score, 2),
+            "price": round(price_similarity, 2),
+            "brand": round(brand_score, 2),
+        }
         enriched["metadata_score"] = round(metadata, 2)
         enriched["recommendation_score"] = recommendation_score
         enriched["recommendation_reason"] = _candidate_reason(enriched)
@@ -406,7 +532,7 @@ def build_compare_payload(product_ids: list[int], user_priority: str | None = No
     for product_id in product_ids:
         product = db.get_product_with_specs(product_id)
         if not product:
-            raise ValueError(f"product {product_id} not found")
+            raise ValueError(f"product {product_id}를 찾을 수 없습니다.")
         category_id = product["category_id"]
         category_name = product["category_name"]
         products.append(product)

@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block title %}{{ category.name }} · Naver Shopping Buy Guide{% endblock %}
 
+{% set SPEC_LABELS = {
+  "battery_hours": "배터리",
+  "anc": "노이즈 캔슬링",
+  "weight_g": "가벼움",
+  "water_resistance_score": "방수 등급",
+} %}
+
 {% block content %}
 <section class="page-heading">
   <div>
@@ -8,7 +15,7 @@
     <h1>{{ category.name }}</h1>
   </div>
   <form method="post" action="{{ url_for('api_collect') }}?category_id={{ category.id }}">
-    <button class="icon-button" type="submit" title="네이버 API로 상품 재수집">
+    <button class="icon-button" type="submit" title="네이버 API로 상품 재수집" data-loading-label="수집 중...">
       <i data-lucide="refresh-cw"></i>
       <span>수집</span>
     </button>
@@ -30,7 +37,8 @@
 </section>
 {% endif %}
 
-<form class="panel" method="post" action="{{ url_for('compare_form') }}">
+<form id="compare-form" class="panel" method="post" action="{{ url_for('compare_form') }}">
+  <input type="hidden" name="category_id" value="{{ category.id }}">
   <div class="section-title">
     <div>
       <p class="eyebrow">Compare</p>
@@ -38,9 +46,9 @@
     </div>
     <select class="select" name="user_priority" aria-label="우선순위">
       <option value="균형">균형</option>
-      <option value="battery_hours">배터리</option>
-      <option value="anc">노이즈 캔슬링</option>
-      <option value="weight_g">가벼움</option>
+      {% for spec_key in scores.score_weights.keys() %}
+      <option value="{{ spec_key }}">{{ SPEC_LABELS.get(spec_key, spec_key) }}</option>
+      {% endfor %}
       <option value="latest_price">가격</option>
     </select>
   </div>
@@ -67,11 +75,19 @@
     {% endfor %}
   </div>
 
-  <button class="primary-action" type="submit">
+  <button class="primary-action" type="submit" data-loading-label="리포트 생성 중...">
     <i data-lucide="sparkles"></i>
     <span>AI 비교 리포트 생성</span>
   </button>
 </form>
+
+<div class="compare-float-bar" data-compare-float data-compare-float-for="compare-form">
+  <span data-compare-float-count aria-live="polite">0개 선택됨</span>
+  <button type="button" class="primary-action compact" data-compare-float-submit disabled aria-label="선택한 상품 비교하기">
+    <i data-lucide="sparkles"></i>
+    <span>비교하기</span>
+  </button>
+</div>
 
 <section class="panel">
   <div class="section-title">

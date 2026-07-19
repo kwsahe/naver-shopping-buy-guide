@@ -50,12 +50,40 @@
 <section class="panel">
   <div class="section-title">
     <div>
+      <p class="eyebrow">Products</p>
+      <h2>비교 대상 상품</h2>
+    </div>
+  </div>
+  <div class="product-grid">
+    {% for product in products %}
+    <div class="product-card">
+      <span class="product-visual">
+        {% if product.image_url %}
+          <img src="{{ product.image_url }}" alt="{{ product.name }}">
+        {% else %}
+          <span>{{ product.name[:1] }}</span>
+        {% endif %}
+      </span>
+      <span class="product-body">
+        <strong>{{ product.name }}</strong>
+        <small>{{ product.brand or product.maker or "브랜드 확인 불가" }} · {{ product.mall_name or "판매처 확인 불가" }}</small>
+        <b>{{ product.latest_price|money }}</b>
+      </span>
+      <a class="text-link" href="{{ url_for('product_detail_page', product_id=product.id) }}">상세</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-title">
+    <div>
       <p class="eyebrow">Features</p>
       <h2>기능별 비교</h2>
     </div>
   </div>
   <div class="score-table">
-    <div class="score-head"><span>기능</span><span>우위</span><span>근거</span></div>
+    <div class="score-head three"><span>기능</span><span>우위</span><span>근거</span></div>
     {% for row in report.report_json.feature_comparison %}
     <div class="score-row three">
       <span>{{ row.feature }}</span>

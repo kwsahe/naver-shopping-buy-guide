@@ -40,6 +40,10 @@ ACCESSORY_KEYWORDS = {
     "보호대",
     "필터",
     "리모컨",
+    "키링",
+    "고리",
+    "액세서리",
+    "악세사리",
 }
 
 MAIN_PRODUCT_HINTS = {
@@ -72,7 +76,8 @@ def classify_search_item(query: str, item: dict[str, Any], rank: int | None = No
         score += min(len(main_hits) * 14, 28)
         reasons.append("본품 단서가 상품명에 있음")
     if accessory_hits:
-        score -= min(len(accessory_hits) * 30, 70)
+        # 부속품 키워드가 감지되면 감산 강도를 높여 가산점 오버플로우로 인한 오분류 방지
+        score -= (50 + len(accessory_hits) * 15)
         reasons.append(f"부속품 키워드 감지: {', '.join(accessory_hits[:4])}")
     if "액세서리" in category_text or "주변기기" in category_text:
         score -= 25

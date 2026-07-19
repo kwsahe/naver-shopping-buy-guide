@@ -8,7 +8,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 
 import db
 from analysis import check_price_alerts, recompute_category_recommendations
-from collector import collect_hot_products, collect_prices_for_all_products
+from collector import collect_cosmetic_catalog, collect_prices_for_all_products
 from llm_agent import generate_best_pick_reasons
 
 scheduler = BlockingScheduler(timezone="Asia/Seoul")
@@ -42,7 +42,7 @@ def run_daily_pipeline_once() -> dict[str, Any]:
     db.init_db(seed=True)
     prices = _run_with_logging("price_collection", collect_prices_for_all_products)
     alerts = _run_with_logging("alert_check", check_price_alerts)
-    hot_products = _run_with_logging("hot_product_collection", collect_hot_products)
+    hot_products = _run_with_logging("cosmetic_catalog_collection", collect_cosmetic_catalog)
     scores = _run_with_logging("best_pick_recompute", recompute_category_recommendations)
     reasons = _run_with_logging("best_pick_reason_generation", generate_best_pick_reasons, scores)
     return {

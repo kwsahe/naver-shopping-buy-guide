@@ -39,6 +39,88 @@
   </form>
 </section>
 
+<section class="panel" data-skin-recommend>
+  <div class="section-title">
+    <div>
+      <p class="eyebrow">Personalized</p>
+      <h2>피부·모발 맞춤 화장품 추천</h2>
+      <p class="muted">피부 타입·모발 타입 또는 구체적인 피부 고민을 선택하면 샴푸·바디워시·로션·폼클렌징 중 맞는 상품을 찾아드립니다.</p>
+    </div>
+  </div>
+  <p class="recommend-guidance" id="skin-recommend-guidance">
+    입력한 내용은 화장품 선택을 돕는 참고 정보이며 의료적 진단이나 치료를 대신하지 않습니다.
+  </p>
+  <form class="skin-recommend-form" data-skin-recommend-form aria-describedby="skin-recommend-guidance">
+    <div class="field-group">
+      <label class="field-label" for="skin_type">피부 타입</label>
+      <select class="select" id="skin_type" name="skin_type">
+        <option value="">선택 안 함</option>
+        <option value="dry">건성</option>
+        <option value="oily">지성</option>
+        <option value="sensitive">민감성</option>
+      </select>
+    </div>
+    <div class="field-group">
+      <label class="field-label" for="hair_type">모발 타입</label>
+      <select class="select" id="hair_type" name="hair_type">
+        <option value="">선택 안 함</option>
+        <option value="dry">건조/손상</option>
+        <option value="oily">지성</option>
+      </select>
+    </div>
+    <fieldset class="field-group skin-condition-field" data-skin-condition-group>
+      <legend class="field-label">피부 고민 (최대 5개)</legend>
+      <div class="skin-condition-grid" aria-describedby="skin-condition-summary">
+        <label class="skin-condition-option">
+          <input type="checkbox" name="skin_conditions" value="pore_wide">
+          <span>넓어 보이는 모공</span>
+        </label>
+        <label class="skin-condition-option">
+          <input type="checkbox" name="skin_conditions" value="pore_clogged">
+          <span>막힌 모공</span>
+        </label>
+        <label class="skin-condition-option">
+          <input type="checkbox" name="skin_conditions" value="oiliness">
+          <span>피지·유분</span>
+        </label>
+        <label class="skin-condition-option">
+          <input type="checkbox" name="skin_conditions" value="dry_tight">
+          <span>건조·당김</span>
+        </label>
+        <label class="skin-condition-option">
+          <input type="checkbox" name="skin_conditions" value="sensitive_redness">
+          <span>민감·붉음</span>
+        </label>
+        <label class="skin-condition-option">
+          <input type="checkbox" name="skin_conditions" value="trouble_acne">
+          <span>트러블·여드름</span>
+        </label>
+        <label class="skin-condition-option">
+          <input type="checkbox" name="skin_conditions" value="flaky">
+          <span>각질</span>
+        </label>
+        <label class="skin-condition-option">
+          <input type="checkbox" name="skin_conditions" value="pigmentation_dullness">
+          <span>색소·칙칙함</span>
+        </label>
+      </div>
+      <div class="skin-condition-status">
+        <p id="skin-condition-summary" data-skin-condition-summary aria-live="polite">선택한 피부 고민이 없습니다.</p>
+        <button class="ghost-button compact" type="button" data-skin-condition-reset disabled>선택 초기화</button>
+      </div>
+    </fieldset>
+    <button class="primary-action" type="submit" data-loading-label="추천 찾는 중...">
+      <i data-lucide="sparkles"></i>
+      <span>맞춤 추천 받기</span>
+    </button>
+  </form>
+  <p class="muted" data-skin-recommend-message></p>
+  <p class="disclaimer" data-skin-recommend-disclaimer hidden>
+    이 추천은 상품명과 설명을 활용한 화장품 선택 보조 정보이며 의료적 진단이 아닙니다.
+  </p>
+  <div class="product-grid" data-skin-recommend-results></div>
+</section>
+
 <section class="panel hot-panel" data-hot-carousel>
   <div class="section-title">
     <div>
@@ -47,8 +129,8 @@
       <p class="muted">네이버 공식 API 검색 순위와 본품 분류 점수를 기반으로 자동 갱신됩니다.</p>
     </div>
     <div class="carousel-controls">
-      <button type="button" class="ghost-icon" data-hot-prev title="이전"><i data-lucide="chevron-left"></i></button>
-      <button type="button" class="ghost-icon" data-hot-next title="다음"><i data-lucide="chevron-right"></i></button>
+      <button type="button" class="ghost-icon" data-hot-prev title="이전" aria-label="이전 핫상품"><i data-lucide="chevron-left"></i></button>
+      <button type="button" class="ghost-icon" data-hot-next title="다음" aria-label="다음 핫상품"><i data-lucide="chevron-right"></i></button>
     </div>
   </div>
   {% if hot_products %}
@@ -74,7 +156,7 @@
         </div>
         <form method="post" action="{{ url_for('analyze_form') }}">
           <input type="hidden" name="product_id" value="{{ product.id }}">
-          <button class="primary-action compact" type="submit">
+          <button class="primary-action compact" type="submit" data-loading-label="분석 중...">
             <i data-lucide="chart-no-axes-combined"></i>
             <span>상품 분석</span>
           </button>

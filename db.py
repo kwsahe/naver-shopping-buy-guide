@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS products (
     mall_name TEXT,
     link TEXT,
     image_url TEXT,
+    promo_image TEXT,
     product_type TEXT DEFAULT 'main_product',
     classification_score REAL,
     classification_reason TEXT,
@@ -103,6 +104,8 @@ CREATE TABLE IF NOT EXISTS price_alerts (
     target_price INTEGER NOT NULL,
     triggered INTEGER DEFAULT 0,
     triggered_at TEXT,
+    cancelled INTEGER DEFAULT 0,
+    cancelled_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -173,6 +176,7 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         "hot_score": "ALTER TABLE products ADD COLUMN hot_score REAL",
         "hot_reason": "ALTER TABLE products ADD COLUMN hot_reason TEXT",
         "hot_updated_at": "ALTER TABLE products ADD COLUMN hot_updated_at TEXT",
+        "promo_image": "ALTER TABLE products ADD COLUMN promo_image TEXT",
     }
     for column, sql in product_migrations.items():
         if column not in product_columns:
@@ -182,6 +186,10 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
     }
     if "triggered_at" not in alert_columns:
         conn.execute("ALTER TABLE price_alerts ADD COLUMN triggered_at TEXT")
+    if "cancelled" not in alert_columns:
+        conn.execute("ALTER TABLE price_alerts ADD COLUMN cancelled INTEGER DEFAULT 0")
+    if "cancelled_at" not in alert_columns:
+        conn.execute("ALTER TABLE price_alerts ADD COLUMN cancelled_at TEXT")
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -364,7 +372,7 @@ def get_category_by_name(name: str) -> dict[str, Any] | None:
 def get_or_create_category(name: str, naver_category_code: str | None = None) -> int:
     normalized_name = name.strip()
     if not normalized_name:
-        raise ValueError("category name is required")
+        raise ValueError("category 이름이 필요합니다.")
     with connect_db() as conn:
         row = conn.execute(
             """
@@ -586,9 +594,9 @@ def upsert_product_from_naver(category_id: int, item: dict[str, Any]) -> int:
                 category_id, naver_product_id, name, description, brand, maker,
                 mall_name, link, image_url, product_type, classification_score,
                 classification_reason, search_query, search_rank, hot_score, hot_reason,
-                hot_updated_at
+                hot_updated_at, promo_image
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(naver_product_id) DO UPDATE SET
                 category_id = excluded.category_id,
                 name = excluded.name,
@@ -605,7 +613,8 @@ def upsert_product_from_naver(category_id: int, item: dict[str, Any]) -> int:
                 search_rank = excluded.search_rank,
                 hot_score = excluded.hot_score,
                 hot_reason = excluded.hot_reason,
-                hot_updated_at = excluded.hot_updated_at
+                hot_updated_at = excluded.hot_updated_at,
+                promo_image = COALESCE(excluded.promo_image, products.promo_image)
             RETURNING id
             """,
             (
@@ -626,6 +635,7 @@ def upsert_product_from_naver(category_id: int, item: dict[str, Any]) -> int:
                 item.get("hot_score"),
                 item.get("hot_reason"),
                 item.get("hot_updated_at"),
+                item.get("promo_image"),
             ),
         ).fetchone()
         product_id = int(row["id"])
@@ -656,7 +666,8 @@ def update_product_metadata_from_naver(product_id: int, item: dict[str, Any]) ->
                 search_rank = COALESCE(?, search_rank),
                 hot_score = COALESCE(?, hot_score),
                 hot_reason = COALESCE(?, hot_reason),
-                hot_updated_at = COALESCE(?, hot_updated_at)
+                hot_updated_at = COALESCE(?, hot_updated_at),
+                promo_image = COALESCE(?, promo_image)
             WHERE id = ?
             """,
             (
@@ -675,6 +686,7 @@ def update_product_metadata_from_naver(product_id: int, item: dict[str, Any]) ->
                 item.get("hot_score"),
                 item.get("hot_reason"),
                 item.get("hot_updated_at"),
+                item.get("promo_image"),
                 product_id,
             ),
         )
@@ -693,6 +705,9 @@ def build_product_description(source: dict[str, Any]) -> str:
     ]
     category_path = " > ".join(str(part) for part in category_parts if part)
     fragments = [f"{name}은(는) {brand}의 상품입니다.", f"판매처: {mall}."]
+    detail_description = str(source.get("detail_description") or "").strip()
+    if detail_description:
+        fragments.append(f"상품 상세정보: {detail_description}")
     if price:
         fragments.append(f"수집 최저가는 {int(price):,}원입니다.")
     if category_path:
@@ -885,18 +900,20 @@ def get_open_alerts() -> list[dict[str, Any]]:
                    ) AS latest_price
             FROM price_alerts a
             JOIN products p ON p.id = a.product_id
-            WHERE a.triggered = 0
+              WHERE a.triggered = 0 AND a.cancelled = 0
             ORDER BY a.created_at DESC
             """
         ).fetchall()
         return rows_to_dicts(rows)
 
 
-def list_alerts(limit: int = 30) -> list[dict[str, Any]]:
+def list_alerts(limit: int = 30, product_id: int | None = None) -> list[dict[str, Any]]:
     with connect_db() as conn:
+        where_clause = "WHERE a.product_id = ?" if product_id is not None else ""
+        params: tuple[Any, ...] = (product_id, limit) if product_id is not None else (limit,)
         rows = conn.execute(
-            """
-            SELECT a.*, p.name AS product_name,
+            f"""
+              SELECT a.*, p.name AS product_name,
                    (
                        SELECT ph.price
                        FROM price_history ph
@@ -904,14 +921,36 @@ def list_alerts(limit: int = 30) -> list[dict[str, Any]]:
                        ORDER BY ph.collected_at DESC, ph.id DESC
                        LIMIT 1
                    ) AS latest_price
-            FROM price_alerts a
-            JOIN products p ON p.id = a.product_id
-            ORDER BY a.created_at DESC, a.id DESC
-            LIMIT ?
+              FROM price_alerts a
+              JOIN products p ON p.id = a.product_id
+              {where_clause}
+              ORDER BY a.created_at DESC, a.id DESC
+              LIMIT ?
             """,
-            (limit,),
+            params,
         ).fetchall()
         return rows_to_dicts(rows)
+
+
+def cancel_alert(alert_id: int) -> dict[str, Any] | None:
+    with connect_db() as conn:
+        alert = conn.execute("SELECT * FROM price_alerts WHERE id = ?", (alert_id,)).fetchone()
+        if not alert:
+            return None
+        if alert["triggered"] or alert["cancelled"]:
+            result = row_to_dict(alert) or {}
+            result["cancellation_performed"] = False
+            return result
+        cancelled_at = datetime.now().isoformat(timespec="seconds")
+        conn.execute(
+            "UPDATE price_alerts SET cancelled = 1, cancelled_at = ? WHERE id = ?",
+            (cancelled_at, alert_id),
+        )
+        result = row_to_dict(
+            conn.execute("SELECT * FROM price_alerts WHERE id = ?", (alert_id,)).fetchone()
+        ) or {}
+        result["cancellation_performed"] = True
+        return result
 
 
 def list_alert_events(limit: int = 30) -> list[dict[str, Any]]:
@@ -1043,7 +1082,7 @@ products(id, category_id, naver_product_id, name, description, brand, maker, mal
 specs(id, product_id, spec_key, spec_value, source, curated_at)
 price_history(id, product_id, price, collected_at)
 comparison_reports(id, category_id, product_ids, user_priority, llm_model, report_json, created_at)
-price_alerts(id, product_id, target_price, triggered, triggered_at, created_at)
+  price_alerts(id, product_id, target_price, triggered, triggered_at, cancelled, cancelled_at, created_at)
 alert_events(id, alert_id, product_id, target_price, actual_price, message, created_at)
 category_recommendations(id, category_id, best_value_product_id, best_value_score, best_value_reason,
   best_performance_product_id, best_performance_score, best_performance_reason, llm_model, generated_at)

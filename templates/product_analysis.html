@@ -54,10 +54,29 @@
           <p>{{ product.recommendation_reason }}</p>
           <div class="score-pills">
             <span>추천 {{ product.recommendation_score }}</span>
-            <span>상품명 {{ product.name_similarity_score }}</span>
-            <span>가격대 {{ product.price_similarity_score }}</span>
             <span>가격매력 {{ product.price_value_score }}</span>
           </div>
+          {% if product.similarity_breakdown %}
+          <div class="similarity-breakdown">
+            <div class="similarity-bar">
+              <span class="label">상품명 유사</span>
+              <div class="progress"><div class="progress-bar" style="width: {{ product.similarity_breakdown.name }}%"></div></div>
+              <span class="value">{{ product.similarity_breakdown.name }}%</span>
+            </div>
+            <div class="similarity-bar">
+              <span class="label">가격대 유사</span>
+              <div class="progress"><div class="progress-bar" style="width: {{ product.similarity_breakdown.price }}%"></div></div>
+              <span class="value">{{ product.similarity_breakdown.price }}%</span>
+            </div>
+            <div class="similarity-bar">
+              <span class="label">브랜드 일치</span>
+              <div class="progress"><div class="progress-bar" style="width: {{ product.similarity_breakdown.brand }}%"></div></div>
+              <span class="value">
+                {% if product.similarity_breakdown.brand == 100 %}일치 (100%){% elif product.similarity_breakdown.brand == 0 %}불일치 (0%){% else %}미확인 (50%){% endif %}
+              </span>
+            </div>
+          </div>
+          {% endif %}
           <strong>{{ product.latest_price|money }}</strong>
         </div>
       </article>
@@ -67,6 +86,38 @@
     </div>
   </div>
 </section>
+
+{% if result.similarity_breakdown %}
+<section class="panel">
+  <div class="section-title">
+    <div>
+      <p class="eyebrow">Similarity Matrix</p>
+      <h2>비교 후보 유사도 분석</h2>
+    </div>
+  </div>
+  <div class="score-table">
+    <div class="score-head">
+      <span>상품명</span><span>상품명 유사도</span><span>가격대 유사도</span><span>브랜드 일치도</span>
+    </div>
+    {% for breakdown in result.similarity_breakdown %}
+    <div class="score-row">
+      <span>{{ breakdown.product_name }}</span>
+      <span>{{ breakdown.name }}%</span>
+      <span>{{ breakdown.price }}%</span>
+      <span>
+        {% if breakdown.brand == 100 %}
+          일치 (100%)
+        {% elif breakdown.brand == 0 %}
+          불일치 (0%)
+        {% else %}
+          미확인 (50%)
+        {% endif %}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 
 <section class="panel">
   <div class="section-title">

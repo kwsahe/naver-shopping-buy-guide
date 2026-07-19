@@ -4,6 +4,17 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 {% endblock %}
 
+{% set SPEC_LABELS = {
+  "battery_hours": "배터리 지속시간",
+  "anc": "노이즈 캔슬링",
+  "weight_g": "무게",
+  "water_resistance_score": "방수 등급",
+} %}
+{% set SPEC_UNITS = {
+  "battery_hours": "시간",
+  "weight_g": "g",
+} %}
+
 {% block content %}
 <section class="page-heading">
   <div>
@@ -27,6 +38,12 @@
       {% endif %}
     </div>
     <p>{{ product.description or "상품 설명은 아직 수집되지 않았습니다. 네이버 API 수집 후 자동으로 채워집니다." }}</p>
+    {% if product.promo_image %}
+    <div class="promo-image">
+      <p class="eyebrow">Promotion</p>
+      <img src="{{ product.promo_image }}" alt="{{ product.name }} 홍보 이미지" loading="lazy">
+    </div>
+    {% endif %}
   </div>
 
   <div class="panel wide">
@@ -72,11 +89,35 @@
       <input type="hidden" name="product_id" value="{{ product.id }}">
       <label class="field-label" for="target_price">목표가</label>
       <input class="input" id="target_price" name="target_price" type="number" min="1" step="100" value="{{ stats.current_price }}" required>
+      <div id="price-warning" class="muted" style="margin-top:-6px; font-size:12px; display:none; color:var(--coral);">현재 최저가({{ stats.current_price|money }}) 이상으로 설정하면 즉시 발동될 수 있습니다.</div>
       <button class="primary-action" type="submit">
         <i data-lucide="bell"></i>
         <span>알림 등록</span>
       </button>
     </form>
+
+    <div class="alert-list" data-alert-list>
+      {% for alert in alerts %}
+      <div class="alert-row" data-alert-row data-alert-id="{{ alert.id }}">
+        <span>
+          <strong>목표 {{ alert.target_price|money }}</strong>
+          <small>등록 {{ alert.created_at }}</small>
+        </span>
+        <span class="badge {% if alert.triggered %}dark{% endif %}" data-alert-status>
+          {% if alert.triggered %}발동됨{% elif alert.cancelled %}취소됨{% else %}대기중{% endif %}
+        </span>
+        <button
+          class="ghost-button"
+          type="button"
+          data-alert-cancel
+          data-alert-id="{{ alert.id }}"
+          {% if alert.triggered or alert.cancelled %}disabled{% endif %}
+        >취소</button>
+      </div>
+      {% else %}
+      <p class="muted">등록된 알림이 없습니다.</p>
+      {% endfor %}
+    </div>
   </div>
 </section>
 
@@ -89,10 +130,16 @@
   </div>
   <div class="spec-grid">
     {% for key, value in product.items() %}
-      {% if key in ["battery_hours", "anc", "weight_g", "water_resistance_score"] %}
+      {% if key in SPEC_LABELS %}
       <div>
-        <span>{{ key }}</span>
-        <strong>{{ value }}</strong>
+        <span>{{ SPEC_LABELS.get(key, key) }}</span>
+        {% if value is sameas true %}
+          <strong>지원</strong>
+        {% elif value is sameas false %}
+          <strong>미지원</strong>
+        {% else %}
+          <strong>{{ value }}{{ SPEC_UNITS.get(key, "") }}</strong>
+        {% endif %}
       </div>
       {% endif %}
     {% endfor %}

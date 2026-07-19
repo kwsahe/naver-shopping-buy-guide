@@ -7,9 +7,15 @@
     <p class="eyebrow">Search</p>
     <h1>상품 검색</h1>
     {% if query %}
-    <p class="muted">검색어: {{ query }}{% if search_meta and search_meta.used_query != query %} · 실제 검색: {{ search_meta.used_query }}{% endif %}</p>
-    {% if search_meta and search_meta.excluded_count %}
-    <p class="muted">부속품으로 분류된 {{ search_meta.excluded_count }}개 상품은 기본 결과에서 제외했습니다.
+    <p class="muted">검색어: {{ query }}{% if search_meta and search_meta.used_query != query %} · 실제 검색: {{ search_meta.used_query }}{% endif %}{% if took_ms is not none %} · {{ took_ms }}ms{% endif %}
+      {% if took_ms is not none and took_ms > 1200 %}
+      <span class="badge warn" title="네이버 쇼핑 API 응답이 지연되어 자동으로 재시도했을 수 있습니다.">
+        <i data-lucide="alert-triangle"></i> 응답 지연 감지
+      </span>
+      {% endif %}
+    </p>
+    {% if search_meta and search_meta.accessory_count %}
+    <p class="muted">부속품으로 분류된 {{ search_meta.accessory_count }}개 상품은 기본 결과에서 제외했습니다.
       {% if include_accessories %}
         <a class="text-link" href="{{ url_for('search_page', q=query) }}">본품만 보기</a>
       {% else %}
@@ -78,7 +84,7 @@
     {% endfor %}
   </div>
 
-  <button class="primary-action" type="submit">
+  <button class="primary-action" type="submit" data-loading-label="분석 중...">
     <i data-lucide="chart-no-axes-combined"></i>
     <span>상품 분석</span>
   </button>

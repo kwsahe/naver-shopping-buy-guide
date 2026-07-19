@@ -8,7 +8,7 @@
     <h1>파이프라인 관찰성</h1>
   </div>
   <form method="post" action="{{ url_for('api_collect') }}">
-    <button class="icon-button" type="submit">
+    <button class="icon-button" type="submit" data-loading-label="수집 중...">
       <i data-lucide="play"></i>
       <span>가격 수집</span>
     </button>
@@ -87,7 +87,7 @@
       {% for alert in alerts %}
       <span>
         <strong>{{ alert.product_name }}</strong>
-        <small>목표 {{ alert.target_price|money }} · 현재 {{ alert.latest_price|money }} · {% if alert.triggered %}발동{% else %}대기{% endif %}</small>
+        <small>목표 {{ alert.target_price|money }} · 현재 {{ alert.latest_price|money }} · {% if alert.triggered %}발동{% elif alert.cancelled %}취소{% else %}대기{% endif %}</small>
       </span>
       {% else %}
       <p class="muted">등록된 알림이 없습니다.</p>

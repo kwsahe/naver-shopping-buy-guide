@@ -2,15 +2,19 @@ from __future__ import annotations
 
 import json
 import os
+from time import perf_counter
 from typing import Any
 
 from flask import Flask, jsonify, redirect, render_template, request, url_for
+from requests import RequestException
 
 import analysis
 import db
 import db_coder_agent
+from antigravity_cli import recommend_products
 from collector import (
     check_naver_api_connection,
+    collect_cosmetic_catalog,
     collect_hot_products,
     collect_prices_for_all_products,
     collect_products_for_category,
@@ -57,7 +61,9 @@ def create_app() -> Flask:
         products: list[dict[str, Any]] = []
         search_meta: dict[str, Any] | None = None
         error = None
+        took_ms = None
         if query:
+            started_at = perf_counter()
             try:
                 include_accessories = request.args.get("include_accessories") == "1"
                 search_meta = collect_products_for_search(
@@ -70,6 +76,7 @@ def create_app() -> Flask:
                     for product_id in search_meta["product_ids"]
                     if (product := db.get_product(product_id))
                 ]
+                took_ms = round((perf_counter() - started_at) * 1000, 2)
             except Exception as exc:
                 error = str(exc)
         return render_template(
@@ -78,6 +85,7 @@ def create_app() -> Flask:
             products=products,
             search_meta=search_meta,
             error=error,
+            took_ms=took_ms,
             include_accessories=request.args.get("include_accessories") == "1",
         )
 
@@ -119,12 +127,14 @@ def create_app() -> Flask:
         history = db.get_price_history(product_id, days=90)
         stats = analysis.compute_price_stats(product_id, days=90)
         timing = analysis.buy_timing_from_stats(stats)
+        alerts = db.list_alerts(limit=20, product_id=product_id)
         return render_template(
             "product_detail.html",
             product=product,
             history=history,
             stats=stats,
             timing=timing,
+            alerts=alerts,
         )
 
     @app.route("/reports/<int:report_id>")
@@ -162,7 +172,8 @@ def create_app() -> Flask:
     def api_search():
         query = request.args.get("q", "").strip()
         if not query:
-            return jsonify({"error": "q is required"}), 400
+            return jsonify({"error": "검색어 q가 필요합니다."}), 400
+        started_at = perf_counter()
         search_meta = collect_products_for_search(
             query,
             display=request.args.get("display", 20, type=int),
@@ -171,7 +182,15 @@ def create_app() -> Flask:
         products = [
             product for product_id in search_meta["product_ids"] if (product := db.get_product(product_id))
         ]
-        return jsonify({"search": search_meta, "products": products})
+        took_ms = round((perf_counter() - started_at) * 1000, 2)
+        return jsonify(
+            {
+                "search": search_meta,
+                "products": products,
+                "took_ms": took_ms,
+                "accessory_count": search_meta.get("accessory_count", 0),
+            }
+        )
 
     @app.route("/api/hot-products")
     def api_hot_products():
@@ -179,6 +198,49 @@ def create_app() -> Flask:
         if refresh:
             collect_hot_products()
         return jsonify({"products": db.list_hot_products(limit=request.args.get("limit", 8, type=int))})
+
+    @app.route("/api/recommend", methods=["GET", "POST"])
+    def api_recommend():
+        payload = request.args if request.method == "GET" else (request.get_json(silent=True) or request.form)
+        skin_type = str(payload.get("skin_type") or "").strip().lower() or None
+        hair_type = str(payload.get("hair_type") or "").strip().lower() or None
+        try:
+            skin_conditions = _parse_skin_conditions(payload)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if not skin_type and not hair_type and not skin_conditions:
+            return jsonify({"error": "skin_type 또는 hair_type 중 하나를 입력하세요."}), 400
+        if skin_type not in {None, "dry", "oily", "sensitive"}:
+            return jsonify({"error": "skin_type은 dry, oily, sensitive 중 하나여야 합니다."}), 400
+        if hair_type not in {None, "dry", "oily"}:
+            return jsonify({"error": "hair_type은 dry, oily 중 하나여야 합니다."}), 400
+        raw_limit = payload.get("limit", "20")
+        try:
+            limit = int(raw_limit)
+        except (TypeError, ValueError):
+            return jsonify({"error": "limit은 1 이상 100 이하의 정수여야 합니다."}), 400
+        if not 1 <= limit <= 100:
+            return jsonify({"error": "limit은 1 이상 100 이하의 정수여야 합니다."}), 400
+        recommendations = recommend_products(skin_type=skin_type, hair_type=hair_type)
+        recommendations = analysis.apply_skin_condition_scores(
+            recommendations,
+            skin_conditions,
+            require_condition_match=not skin_type and not hair_type,
+        )[:limit]
+        return jsonify(
+            {
+                "skin_type": skin_type,
+                "hair_type": hair_type,
+                "skin_conditions": skin_conditions,
+                "recommendations": recommendations,
+                "count": len(recommendations),
+                "engine": "antigravity_rules",
+                "disclaimer": (
+                    "이 추천은 상품명과 설명을 활용한 화장품 선택 보조 정보이며 "
+                    "의료적 진단이 아닙니다."
+                ),
+            }
+        )
 
     @app.route("/api/analyze", methods=["POST"])
     def api_analyze():
@@ -208,9 +270,18 @@ def create_app() -> Flask:
 
     @app.route("/compare", methods=["POST"])
     def compare_form():
-        product_ids = _coerce_product_ids(request.form.getlist("product_ids"))
+        try:
+            product_ids = _coerce_product_ids(request.form.getlist("product_ids"))
+        except (TypeError, ValueError):
+            product_ids = []
         if len(product_ids) < 2:
-            return redirect(request.referrer or url_for("index"))
+            category_id = request.form.get("category_id", type=int)
+            target = (
+                url_for("category_page", category_id=category_id, error="select_more")
+                if category_id is not None and db.get_category(category_id)
+                else url_for("index", error="select_more")
+            )
+            return redirect(target)
         compare_input = analysis.build_compare_payload(
             product_ids,
             request.form.get("user_priority") or None,
@@ -250,12 +321,34 @@ def create_app() -> Flask:
 
     @app.route("/api/alerts")
     def api_alert_list():
+        raw_product_id = request.args.get("product_id")
+        product_id = request.args.get("product_id", type=int)
+        if raw_product_id is not None and product_id is None:
+            return jsonify({"error": "product_id는 정수여야 합니다."}), 400
+        limit = request.args.get("limit", default=30, type=int)
+        if limit is None or limit < 1:
+            return jsonify({"error": "limit은 1 이상의 정수여야 합니다."}), 400
         return jsonify(
             {
-                "alerts": db.list_alerts(limit=request.args.get("limit", default=30, type=int)),
+                "alerts": db.list_alerts(
+                    limit=limit,
+                    product_id=product_id,
+                ),
                 "events": db.list_alert_events(limit=30),
             }
         )
+
+    @app.route("/api/alerts/<int:alert_id>/cancel", methods=["POST"])
+    def api_alert_cancel(alert_id: int):
+        alert = db.cancel_alert(alert_id)
+        if not alert:
+            return jsonify({"error": "가격 알림을 찾을 수 없습니다."}), 404
+        cancellation_performed = alert.pop("cancellation_performed", False)
+        if alert["triggered"]:
+            return jsonify({"error": "이미 발송된 가격 알림은 취소할 수 없습니다."}), 400
+        if cancellation_performed:
+            return jsonify({"alert": alert})
+        return jsonify({"error": "이미 취소된 가격 알림입니다."}), 400
 
     @app.route("/api/alerts/check", methods=["POST"])
     def api_alert_check():
@@ -264,14 +357,25 @@ def create_app() -> Flask:
 
     @app.route("/api/collect", methods=["POST"])
     def api_collect():
+        raw_category_id = request.args.get("category_id")
         category_id = request.args.get("category_id", type=int)
-        if category_id:
+        if raw_category_id is not None and category_id is None:
+            return jsonify({"error": "category_id는 정수여야 합니다."}), 400
+        if category_id is not None:
+            if not db.get_category(category_id):
+                return jsonify({"error": "수집할 카테고리를 찾을 수 없습니다."}), 404
             product_ids = collect_products_for_category(category_id)
             return jsonify({"collected_product_ids": product_ids})
         prices = collect_prices_for_all_products()
-        hot_products = collect_hot_products()
+        cosmetic_products = collect_cosmetic_catalog()
         analysis.recompute_category_recommendations()
-        return jsonify({"prices": prices, "hot_products": hot_products[:8]})
+        return jsonify(
+            {
+                "prices": prices,
+                "hot_products": cosmetic_products[:8],
+                "collected_count": len(cosmetic_products),
+            }
+        )
 
     @app.route("/api/feedback", methods=["POST"])
     def api_feedback():
@@ -304,7 +408,7 @@ def create_app() -> Flask:
         payload = request.get_json(silent=True) or request.form
         question = str(payload.get("question", "")).strip()
         if not question:
-            return jsonify({"error": "question is required"}), 400
+            return jsonify({"error": "질문 question이 필요합니다."}), 400
         try:
             return jsonify(db_coder_agent.answer_question(question))
         except ValueError as exc:
@@ -325,7 +429,11 @@ def _ensure_recommendations() -> None:
 
 def _ensure_hot_products() -> None:
     if len(db.hot_product_queries_today()) < 3:
-        collect_hot_products()
+        try:
+            collect_hot_products()
+        except RequestException:
+            # 외부 API 장애가 앱 시작 자체를 막지 않도록 기존 로컬 데이터를 사용한다.
+            return
 
 
 def _create_analysis_report(product_id: int) -> dict[str, Any]:
@@ -363,6 +471,32 @@ def _first(value: Any) -> Any:
     if isinstance(value, list):
         return value[0] if value else None
     return value
+
+
+def _parse_skin_conditions(payload: Any) -> list[str]:
+    if hasattr(payload, "getlist"):
+        raw_values = payload.getlist("skin_conditions")
+    else:
+        raw_value = payload.get("skin_conditions")
+        raw_values = raw_value if isinstance(raw_value, list) else [raw_value]
+
+    normalized: list[str] = []
+    for raw_value in raw_values:
+        if raw_value is None:
+            continue
+        for value in str(raw_value).split(","):
+            condition = value.strip().lower()
+            if condition and condition not in normalized:
+                normalized.append(condition)
+
+    unsupported = [
+        condition for condition in normalized if condition not in analysis.SKIN_CONDITION_RULES
+    ]
+    if unsupported:
+        raise ValueError(f"지원하지 않는 피부 상태입니다: {', '.join(unsupported)}")
+    if len(normalized) > 5:
+        raise ValueError("skin_conditions는 최대 5개까지 선택할 수 있습니다.")
+    return normalized
 
 
 app = create_app()

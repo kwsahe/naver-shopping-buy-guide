@@ -22,6 +22,12 @@
     </header>
 
     <main class="page-shell">
+      {% if request.args.get("error") == "select_more" %}
+      <section class="notice-banner danger" role="alert">
+        <i data-lucide="alert-triangle"></i>
+        <span>비교할 상품을 2개 이상 선택하세요.</span>
+      </section>
+      {% endif %}
       {% block content %}{% endblock %}
     </main>
 

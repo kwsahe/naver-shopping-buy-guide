@@ -3,9 +3,9 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.pytest_run/
 .ruff_cache/
 data/app.db
 data/*.db
 instance/
 *.log
-

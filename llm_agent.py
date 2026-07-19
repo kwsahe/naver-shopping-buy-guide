@@ -35,7 +35,7 @@ def input_validation_node(state: LLMTaskState) -> LLMTaskState:
     if task_type not in {"compare", "buy_timing", "best_pick"}:
         raise ValueError(f"unsupported task_type: {task_type}")
     if not isinstance(state.get("input_data"), dict):
-        raise ValueError("input_data must be a dictionary")
+        raise ValueError("input_data는 dictionary여야 합니다.")
     state.setdefault("retry_count", 0)
     state.setdefault("max_retries", 2)
     state.setdefault("prompt", None)
@@ -207,7 +207,7 @@ def _call_openai_compatible(prompt: str) -> str:
     api_base = os.getenv("LLM_API_BASE", "").rstrip("/")
     api_key = os.getenv("LLM_API_KEY", "")
     if not api_base:
-        raise RuntimeError("LLM_API_BASE is required for remote_openai")
+        raise RuntimeError("remote_openai 사용에는 LLM_API_BASE가 필요합니다.")
     endpoint = f"{api_base}/chat/completions"
     response = requests.post(
         endpoint,
@@ -259,7 +259,7 @@ def _parse_json_object(raw: str) -> dict[str, Any]:
             raise
         parsed = json.loads(raw[start : end + 1])
     if not isinstance(parsed, dict):
-        raise ValueError("response must be a JSON object")
+        raise ValueError("response는 JSON 객체여야 합니다.")
     return parsed
 
 
@@ -273,7 +273,7 @@ def _validate_schema(task_type: TaskType, parsed: dict[str, Any]) -> None:
             raise ValueError("compare response requires feature_comparison list")
     elif task_type == "buy_timing":
         if parsed.get("verdict") not in {"buy_now", "wait", "neutral"}:
-            raise ValueError("buy_timing verdict must be buy_now, wait, or neutral")
+            raise ValueError("buy_timing verdict는 buy_now, wait, neutral 중 하나여야 합니다.")
         if not isinstance(parsed.get("reason"), str):
             raise ValueError("buy_timing response requires reason string")
     else:

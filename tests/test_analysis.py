@@ -107,5 +107,7 @@ def test_analyze_selected_product_recommends_candidates(tmp_path, monkeypatch) -
     assert result["selected_product"]["id"] == products[0]["id"]
     assert result["recommendations"]
     assert result["recommendations"][0]["recommendation_score"] >= 0
+    assert set(result["recommendations"][0]["similarity_breakdown"]) == {"name", "price", "brand"}
+    assert result["similarity_breakdown"][0]["product_id"] == result["recommendations"][0]["id"]
     assert result["scoring_criteria"][0]["weight"] == 30
     assert result["feature_comparison"]
