@@ -58,6 +58,11 @@ def test_cosmetic_collection_stores_promo_image(tmp_path, monkeypatch) -> None:
             conn.execute("ALTER TABLE products ADD COLUMN promo_image TEXT")
 
     monkeypatch.setattr(collector, "has_naver_credentials", lambda: True)
+    monkeypatch.setattr(
+        collector,
+        "search_public_review_excerpts",
+        lambda product_title, display=3: [],
+    )
 
     # search_shop_with_retry를 mocking하여 임의의 화장품 상품 반환
     monkeypatch.setattr(
@@ -346,3 +351,114 @@ def test_search_shop_no_retry_on_4xx_errors(monkeypatch) -> None:
         collector.search_shop("test")
 
     assert call_count == 1
+
+
+def test_cosmetic_catalog_meets_each_category_target_and_all_segments(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "app.db"))
+    db.init_db(seed=False)
+    monkeypatch.setattr(collector, "has_naver_credentials", lambda: True)
+    calls = []
+
+    def fake_search(query, display=20, sort="sim", start=1):
+        calls.append((query, sort, start))
+        items = [
+            {
+                "productId": f"{query}-{sort}-{start + offset}",
+                "title": f"{query} 본품 {start + offset}",
+                "lprice": str(1000 + start + offset),
+                "image": "https://example.com/product.jpg",
+                "mallName": "Demo",
+            }
+            for offset in range(display)
+        ]
+        return query, items
+
+    monkeypatch.setattr(collector, "search_shop_with_retry", fake_search)
+    monkeypatch.setattr(
+        collector,
+        "_extract_product_detail_data",
+        lambda url: (None, None, []),
+    )
+    monkeypatch.setattr(
+        collector,
+        "search_public_review_excerpts",
+        lambda product_title, display=3: [],
+    )
+
+    products = collector.collect_cosmetic_catalog(
+        display_per_query=20,
+        minimum_per_category=12,
+    )
+    summary = db.get_collection_summary([product["id"] for product in products])
+
+    assert all(
+        summary["category_counts"].get(category, 0) >= 12
+        for category in collector.COSMETIC_QUERY_GROUPS
+    )
+    assert set(summary["price_segments"]) == {"고가", "저가", "검색 상위"}
+    assert {sort for _, sort, _ in calls} == {"dsc", "asc", "sim"}
+
+
+def test_extract_public_reviews_reads_json_ld_and_embedded_json() -> None:
+    page_html = """
+    <script type="application/ld+json">
+      {"@type":"Review","reviewBody":"순하고 좋아요","author":{"name":"user1"},
+       "reviewRating":{"ratingValue":"5"},"datePublished":"2026-07-18"}
+    </script>
+    <script id="__NEXT_DATA__" type="application/json">
+      {"props":{"reviews":[{"reviewContent":"세정력이 좋아요","writerName":"user2",
+       "score":4,"registerDate":"2026-07-17"}]}}
+    </script>
+    """
+
+    reviews = collector._extract_public_reviews(
+        page_html,
+        "https://shopping.naver.com/catalog/1",
+    )
+
+    assert {review["content"] for review in reviews} == {
+        "순하고 좋아요",
+        "세정력이 좋아요",
+    }
+    assert {review["rating"] for review in reviews} == {4.0, 5.0}
+
+
+def test_search_public_review_excerpts_marks_source(monkeypatch) -> None:
+    monkeypatch.setattr(collector, "_credentials", lambda: ("id", "secret"))
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "items": [
+                    {
+                        "description": "<b>순하고 촉촉한</b> 사용 후기",
+                        "link": "https://blog.naver.com/example/1",
+                        "bloggername": "사용자",
+                        "postdate": "20260718",
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(collector.requests, "get", lambda *args, **kwargs: Response())
+
+    reviews = collector.search_public_review_excerpts("테스트 로션")
+
+    assert reviews[0]["content"] == "순하고 촉촉한 사용 후기"
+    assert reviews[0]["source_kind"] == "naver_blog_excerpt"
+    assert reviews[0]["rating"] is None
+
+
+def test_search_public_review_excerpts_tolerates_request_failure(monkeypatch) -> None:
+    monkeypatch.setattr(collector, "_credentials", lambda: ("id", "secret"))
+
+    def fail(*args, **kwargs):
+        raise requests.Timeout("timeout")
+
+    monkeypatch.setattr(collector.requests, "get", fail)
+
+    assert collector.search_public_review_excerpts("테스트 로션") == []

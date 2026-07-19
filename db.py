@@ -88,6 +88,32 @@ CREATE TABLE IF NOT EXISTS price_history (
     collected_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS product_collection_evidence (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    search_query TEXT NOT NULL,
+    sort_mode TEXT NOT NULL,
+    search_rank INTEGER NOT NULL,
+    price_segment TEXT NOT NULL,
+    popularity_score REAL,
+    collected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(product_id, search_query, sort_mode)
+);
+
+CREATE TABLE IF NOT EXISTS product_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+    external_review_id TEXT NOT NULL,
+    author TEXT,
+    rating REAL,
+    content TEXT NOT NULL,
+    source_url TEXT,
+    source_kind TEXT NOT NULL DEFAULT 'structured_product_page',
+    reviewed_at TEXT,
+    collected_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(product_id, external_review_id)
+);
+
 CREATE TABLE IF NOT EXISTS comparison_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     category_id INTEGER REFERENCES categories(id),
@@ -190,6 +216,14 @@ def _migrate_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE price_alerts ADD COLUMN cancelled INTEGER DEFAULT 0")
     if "cancelled_at" not in alert_columns:
         conn.execute("ALTER TABLE price_alerts ADD COLUMN cancelled_at TEXT")
+    review_columns = {
+        row["name"] for row in conn.execute("PRAGMA table_info(product_reviews)").fetchall()
+    }
+    if "source_kind" not in review_columns:
+        conn.execute(
+            "ALTER TABLE product_reviews "
+            "ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'structured_product_page'"
+        )
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -586,6 +620,121 @@ def add_price(product_id: int, price: int, collected_at: str | None = None) -> N
         )
 
 
+def upsert_collection_evidence(
+    product_id: int,
+    search_query: str,
+    sort_mode: str,
+    search_rank: int,
+    price_segment: str,
+    popularity_score: float | None,
+) -> None:
+    with connect_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO product_collection_evidence (
+                product_id, search_query, sort_mode, search_rank, price_segment,
+                popularity_score, collected_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(product_id, search_query, sort_mode) DO UPDATE SET
+                search_rank = excluded.search_rank,
+                price_segment = excluded.price_segment,
+                popularity_score = excluded.popularity_score,
+                collected_at = excluded.collected_at
+            """,
+            (
+                product_id,
+                search_query,
+                sort_mode,
+                int(search_rank),
+                price_segment,
+                popularity_score,
+                datetime.now().isoformat(timespec="seconds"),
+            ),
+        )
+
+
+def upsert_product_reviews(product_id: int, reviews: list[dict[str, Any]]) -> int:
+    if not reviews:
+        return 0
+    with connect_db() as conn:
+        before = conn.total_changes
+        for review in reviews:
+            conn.execute(
+                """
+                INSERT INTO product_reviews (
+                    product_id, external_review_id, author, rating, content,
+                    source_url, source_kind, reviewed_at, collected_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(product_id, external_review_id) DO UPDATE SET
+                    author = excluded.author,
+                    rating = excluded.rating,
+                    content = excluded.content,
+                    source_url = excluded.source_url,
+                    source_kind = excluded.source_kind,
+                    reviewed_at = excluded.reviewed_at,
+                    collected_at = excluded.collected_at
+                """,
+                (
+                    product_id,
+                    review["external_review_id"],
+                    review.get("author"),
+                    review.get("rating"),
+                    review["content"],
+                    review.get("source_url"),
+                    review.get("source_kind", "structured_product_page"),
+                    review.get("reviewed_at"),
+                    datetime.now().isoformat(timespec="seconds"),
+                ),
+            )
+        return conn.total_changes - before
+
+
+def get_collection_summary(product_ids: list[int] | None = None) -> dict[str, Any]:
+    if product_ids == []:
+        return {"price_segments": {}, "category_counts": {}, "review_count": 0}
+    where = ""
+    params: tuple[Any, ...] = ()
+    if product_ids is not None:
+        placeholders = ",".join("?" for _ in product_ids)
+        where = f"WHERE product_id IN ({placeholders})"
+        params = tuple(product_ids)
+    with connect_db() as conn:
+        evidence_rows = conn.execute(
+            f"""
+            SELECT price_segment, COUNT(DISTINCT product_id) AS product_count
+            FROM product_collection_evidence
+            {where}
+            GROUP BY price_segment
+            """,
+            params,
+        ).fetchall()
+        review_count = conn.execute(
+            f"SELECT COUNT(*) AS count FROM product_reviews {where}",
+            params,
+        ).fetchone()["count"]
+        category_rows = conn.execute(
+            f"""
+            SELECT categories.name, COUNT(DISTINCT products.id) AS product_count
+            FROM products
+            JOIN categories ON categories.id = products.category_id
+            {"WHERE products.id IN (" + ",".join("?" for _ in product_ids) + ")" if product_ids else ""}
+            GROUP BY categories.id, categories.name
+            """,
+            params,
+        ).fetchall()
+    return {
+        "price_segments": {
+            row["price_segment"]: row["product_count"] for row in evidence_rows
+        },
+        "category_counts": {
+            row["name"]: row["product_count"] for row in category_rows
+        },
+        "review_count": int(review_count),
+    }
+
+
 def upsert_product_from_naver(category_id: int, item: dict[str, Any]) -> int:
     with connect_db() as conn:
         row = conn.execute(
@@ -644,7 +793,8 @@ def upsert_product_from_naver(category_id: int, item: dict[str, Any]) -> int:
                 "INSERT INTO price_history (product_id, price) VALUES (?, ?)",
                 (product_id, int(item["lprice"])),
             )
-        return product_id
+    upsert_product_reviews(product_id, item.get("reviews") or [])
+    return product_id
 
 
 def update_product_metadata_from_naver(product_id: int, item: dict[str, Any]) -> None:
@@ -1081,6 +1231,10 @@ products(id, category_id, naver_product_id, name, description, brand, maker, mal
   hot_reason, hot_updated_at, created_at)
 specs(id, product_id, spec_key, spec_value, source, curated_at)
 price_history(id, product_id, price, collected_at)
+product_collection_evidence(id, product_id, search_query, sort_mode, search_rank, price_segment,
+  popularity_score, collected_at)
+product_reviews(id, product_id, external_review_id, author, rating, content, source_url, source_kind,
+  reviewed_at, collected_at)
 comparison_reports(id, category_id, product_ids, user_priority, llm_model, report_json, created_at)
   price_alerts(id, product_id, target_price, triggered, triggered_at, cancelled, cancelled_at, created_at)
 alert_events(id, alert_id, product_id, target_price, actual_price, message, created_at)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import html
+import json
+import math
 import os
 import re
 import time
@@ -14,9 +17,12 @@ import db
 from product_classifier import classify_search_item
 
 NAVER_SHOP_ENDPOINT = "https://openapi.naver.com/v1/search/shop.json"
+NAVER_BLOG_ENDPOINT = "https://openapi.naver.com/v1/search/blog.json"
 TAG_RE = re.compile(r"<[^>]+>")
-DEFAULT_HOT_QUERIES = ["샴푸", "바디워시", "로션", "폼클렌징"]
+DEFAULT_HOT_QUERIES = ["화장품", "클렌징폼", "페이스 로션", "바디로션"]
 COSMETIC_CATALOG_DISPLAY = 100
+COSMETIC_CATALOG_SORTS = ("dsc", "asc", "sim")
+COSMETIC_DETAIL_LIMIT_PER_QUERY = 20
 COSMETIC_KEYWORDS = ("샴푸", "바디워시", "로션", "폼클렌징", "폼클렌저", "화장품")
 IMAGE_TAG_RE = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 IMAGE_SRC_RE = re.compile(
@@ -29,9 +35,24 @@ IMAGE_WIDTH_RE = re.compile(r"\bwidth=[\"']?(\d+)", re.IGNORECASE)
 IMAGE_HEIGHT_RE = re.compile(r"\bheight=[\"']?(\d+)", re.IGNORECASE)
 META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
 META_ATTR_RE = re.compile(r"([\w:-]+)\s*=\s*([\"'])(.*?)\2", re.IGNORECASE | re.DOTALL)
+JSON_LD_RE = re.compile(
+    r"<script\b[^>]*type=[\"']application/ld\+json[\"'][^>]*>(.*?)</script>",
+    re.IGNORECASE | re.DOTALL,
+)
+PUBLIC_JSON_RE = re.compile(
+    r"<script\b[^>]*type=[\"']application/json[\"'][^>]*>(.*?)</script>",
+    re.IGNORECASE | re.DOTALL,
+)
 DETAIL_REDIRECT_LIMIT = 3
 SHOP_REQUEST_MAX_RETRIES = 3
 SHOP_REQUEST_BACKOFF_SECONDS = 0.5
+COSMETIC_MINIMUM_PER_CATEGORY = 100
+COSMETIC_MAX_START = 1000
+COSMETIC_QUERY_GROUPS = {
+    "화장품": ("화장품", "스킨케어 화장품", "기초화장품"),
+    "클렌징폼": ("클렌징폼", "폼클렌징", "페이스 클렌저"),
+    "로션": ("페이스 로션", "바디로션", "보습 로션"),
+}
 
 
 def _credentials() -> tuple[str | None, str | None]:
@@ -112,14 +133,24 @@ def search_shop(query: str, display: int = 20, start: int = 1, sort: str = "sim"
     return cleaned_items
 
 
-def search_shop_with_retry(query: str, display: int = 20, sort: str = "sim") -> tuple[str, list[dict[str, Any]]]:
+def search_shop_with_retry(
+    query: str,
+    display: int = 20,
+    sort: str = "sim",
+    start: int = 1,
+) -> tuple[str, list[dict[str, Any]]]:
     search_query = query.strip()
     if not search_query:
         raise ValueError("검색어를 입력하세요.")
-    items = search_shop(search_query, display=display, sort=sort)
+    items = search_shop(search_query, display=display, start=start, sort=sort)
     compact_query = search_query.replace(" ", "")
     if not items and compact_query != search_query:
-        return compact_query, search_shop(compact_query, display=display, sort=sort)
+        return compact_query, search_shop(
+            compact_query,
+            display=display,
+            start=start,
+            sort=sort,
+        )
     return search_query, items
 
 
@@ -267,14 +298,83 @@ def collect_hot_products(
 def collect_cosmetic_catalog(
     queries: list[str] | None = None,
     display_per_query: int = COSMETIC_CATALOG_DISPLAY,
+    minimum_per_category: int = COSMETIC_MINIMUM_PER_CATEGORY,
 ) -> list[dict[str, Any]]:
-    """주요 화장품 카테고리를 넓은 범위로 다시 수집해 기존 상품을 갱신합니다."""
+    """세 제품군을 목표 수량까지 가격대와 검색 상위 결과에서 수집합니다."""
     if not 1 <= display_per_query <= 100:
         raise ValueError("카테고리별 수집 개수는 1 이상 100 이하여야 합니다.")
-    return collect_hot_products(
-        queries=queries or DEFAULT_HOT_QUERIES,
-        display_per_query=display_per_query,
+    if minimum_per_category < 1:
+        raise ValueError("카테고리별 목표 수량은 1 이상이어야 합니다.")
+    if not has_naver_credentials():
+        return db.list_hot_products(limit=display_per_query)
+
+    product_ids: list[int] = []
+    query_groups = (
+        {query: (query,) for query in queries}
+        if queries
+        else COSMETIC_QUERY_GROUPS
     )
+    for category_name, category_queries in query_groups.items():
+        category_id = db.get_or_create_category(category_name)
+        category_product_ids: list[int] = []
+        detail_attempts = 0
+        segment_target = max(1, math.ceil(minimum_per_category / 2))
+        for sort_mode in COSMETIC_CATALOG_SORTS:
+            segment_product_ids: list[int] = []
+            for query in category_queries:
+                for start in range(1, COSMETIC_MAX_START + 1, display_per_query):
+                    used_query, items = search_shop_with_retry(
+                        query,
+                        display=display_per_query,
+                        sort=sort_mode,
+                        start=start,
+                    )
+                    if not items:
+                        break
+                    for offset, item in enumerate(items):
+                        rank = start + offset
+                        if not item.get("productId") or not item.get("lprice"):
+                            continue
+                        collect_detail = (
+                            sort_mode == "sim"
+                            and detail_attempts < COSMETIC_DETAIL_LIMIT_PER_QUERY
+                        )
+                        if collect_detail:
+                            detail_attempts += 1
+                        item.update(
+                            _enrich_search_item(
+                                category_name,
+                                used_query,
+                                item,
+                                rank,
+                                display_per_query,
+                                sort_mode=sort_mode,
+                                collect_detail=collect_detail,
+                            )
+                        )
+                        product_id = db.upsert_product_from_naver(category_id, item)
+                        if item["product_type"] != "main_product":
+                            continue
+                        category_product_ids.append(product_id)
+                        segment_product_ids.append(product_id)
+                        product_ids.append(product_id)
+                        db.upsert_collection_evidence(
+                            product_id=product_id,
+                            search_query=used_query,
+                            sort_mode=sort_mode,
+                            search_rank=rank,
+                            price_segment=_price_segment(sort_mode),
+                            popularity_score=item.get("hot_score"),
+                        )
+                    category_product_ids = list(dict.fromkeys(category_product_ids))
+                    segment_product_ids = list(dict.fromkeys(segment_product_ids))
+                    if len(segment_product_ids) >= segment_target:
+                        break
+                    if len(items) < display_per_query:
+                        break
+                if len(segment_product_ids) >= segment_target:
+                    break
+    return db.get_products_by_ids(list(dict.fromkeys(product_ids)))
 
 
 def _enrich_search_item(
@@ -283,26 +383,43 @@ def _enrich_search_item(
     item: dict[str, Any],
     rank: int,
     display: int,
+    sort_mode: str = "sim",
+    collect_detail: bool = True,
 ) -> dict[str, Any]:
     classification = classify_search_item(query, item, rank=rank)
-    hot_score = _hot_score(item, classification, rank, display)
+    hot_score = (
+        _hot_score(item, classification, rank, display) if sort_mode == "sim" else None
+    )
     promo_image = None
     detail_description = None
-    if _is_cosmetic_query(query):
-        promo_image, detail_description = _extract_product_detail(item.get("link"))
+    reviews: list[dict[str, Any]] = []
+    if collect_detail and _is_cosmetic_query(query):
+        promo_image, detail_description, reviews = _extract_product_detail_data(
+            item.get("link")
+        )
+        if not reviews:
+            reviews = search_public_review_excerpts(item.get("title", ""), display=3)
     return {
         **classification,
         "search_query": used_query,
         "search_rank": rank,
         "hot_score": hot_score,
         "hot_reason": (
-            f"검색 순위 {rank}위, 본품 분류 점수 {classification['classification_score']}점, "
-            "이미지/가격 메타데이터를 반영한 공식 API 기반 핫스코어입니다."
+            f"정확도순 검색 {rank}위, 본품 분류 점수 "
+            f"{classification['classification_score']}점인 검색 상위 근거입니다. "
+            "판매량이나 실제 인기도를 의미하지 않습니다."
+            if sort_mode == "sim"
+            else f"{_price_segment(sort_mode)} 가격 구간 확보를 위한 수집 결과입니다."
         ),
         "hot_updated_at": datetime.now().isoformat(timespec="seconds"),
         "promo_image": promo_image or item.get("image"),
         "detail_description": detail_description,
+        "reviews": reviews,
     }
+
+
+def _price_segment(sort_mode: str) -> str:
+    return {"dsc": "고가", "asc": "저가", "sim": "검색 상위"}.get(sort_mode, "기타")
 
 
 def _is_cosmetic_query(query: str) -> bool:
@@ -318,15 +435,23 @@ def _extract_promo_image(product_url: str | None) -> str | None:
 
 def _extract_product_detail(product_url: str | None) -> tuple[str | None, str | None]:
     """네이버 상세 페이지에서 대표 홍보 이미지와 설명 메타데이터를 추출합니다."""
+    promo_image, detail_description, _ = _extract_product_detail_data(product_url)
+    return promo_image, detail_description
+
+
+def _extract_product_detail_data(
+    product_url: str | None,
+) -> tuple[str | None, str | None, list[dict[str, Any]]]:
+    """상세 페이지 공개 메타데이터에서 이미지·설명·구조화 리뷰를 추출합니다."""
     if not product_url:
-        return None, None
+        return None, None, []
     if not _is_allowed_naver_url(product_url):
-        return None, None
+        return None, None, []
     try:
         response = _get_naver_detail_response(product_url)
         response.raise_for_status()
     except requests.RequestException:
-        return None, None
+        return None, None, []
 
     metadata: dict[str, str] = {}
     for tag in META_TAG_RE.findall(response.text):
@@ -374,7 +499,142 @@ def _extract_product_detail(product_url: str | None) -> tuple[str | None, str | 
     useful_candidates = [item for item in candidates if _is_useful_detail_image(item[1])]
     fallback_candidate = (1 if fallback_image else -1, fallback_image)
     promo_image = max([*useful_candidates, fallback_candidate], key=lambda item: item[0])[1]
-    return promo_image, detail_description
+    reviews = _extract_public_reviews(response.text, product_url)
+    return promo_image, detail_description, reviews
+
+
+def _extract_public_reviews(page_html: str, source_url: str) -> list[dict[str, Any]]:
+    """페이지 HTML에 공개된 구조화 JSON에서만 사용자 리뷰를 수집합니다."""
+    reviews: list[dict[str, Any]] = []
+    for raw_payload in [
+        *JSON_LD_RE.findall(page_html),
+        *PUBLIC_JSON_RE.findall(page_html),
+    ]:
+        try:
+            payload = json.loads(html.unescape(raw_payload).strip())
+        except (json.JSONDecodeError, TypeError):
+            continue
+        for node in _walk_json_nodes(payload):
+            node_type = node.get("@type")
+            types = node_type if isinstance(node_type, list) else [node_type]
+            content = str(
+                node.get("reviewBody")
+                or node.get("reviewContent")
+                or node.get("reviewText")
+                or ""
+            ).strip()
+            if "Review" not in types and not content:
+                continue
+            content = content or str(node.get("description") or "").strip()
+            if not content:
+                continue
+            author_value = (
+                node.get("author")
+                or node.get("writer")
+                or node.get("userName")
+                or node.get("writerName")
+            )
+            author = (
+                author_value.get("name")
+                if isinstance(author_value, dict)
+                else str(author_value or "").strip() or None
+            )
+            rating_value = (
+                node.get("reviewRating")
+                or node.get("rating")
+                or node.get("score")
+            )
+            if isinstance(rating_value, dict):
+                rating_value = rating_value.get("ratingValue")
+            try:
+                rating = float(rating_value) if rating_value is not None else None
+            except (TypeError, ValueError):
+                rating = None
+            identity = str(
+                node.get("identifier")
+                or node.get("@id")
+                or f"{author or ''}|{node.get('datePublished') or ''}|{content}"
+            )
+            external_review_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+            reviews.append(
+                {
+                    "external_review_id": external_review_id,
+                    "author": author,
+                    "rating": rating,
+                    "content": content[:4000],
+                    "source_url": source_url,
+                    "source_kind": "structured_product_page",
+                    "reviewed_at": (
+                        node.get("datePublished")
+                        or node.get("createdAt")
+                        or node.get("registerDate")
+                    ),
+                }
+            )
+    return list({review["external_review_id"]: review for review in reviews}.values())
+
+
+def _extract_structured_reviews(page_html: str, source_url: str) -> list[dict[str, Any]]:
+    """이전 호출부와의 호환성을 유지합니다."""
+    return _extract_public_reviews(page_html, source_url)
+
+
+def search_public_review_excerpts(
+    product_title: str,
+    display: int = 3,
+) -> list[dict[str, Any]]:
+    """네이버 블로그 검색에 공개된 후기 발췌문을 보조 리뷰로 수집합니다."""
+    if not product_title.strip() or not has_naver_credentials():
+        return []
+    client_id, client_secret = _credentials()
+    try:
+        response = requests.get(
+            NAVER_BLOG_ENDPOINT,
+            params={
+                "query": f"{clean_title(product_title)} 후기",
+                "display": max(1, min(display, 100)),
+                "sort": "sim",
+            },
+            headers={
+                "X-Naver-Client-Id": client_id,
+                "X-Naver-Client-Secret": client_secret,
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+    except requests.RequestException:
+        return []
+    reviews = []
+    for item in response.json().get("items", []):
+        content = clean_title(item.get("description", ""))
+        source_url = item.get("link")
+        if not content or not source_url:
+            continue
+        identity = f"{source_url}|{content}"
+        reviews.append(
+            {
+                "external_review_id": hashlib.sha256(
+                    identity.encode("utf-8")
+                ).hexdigest(),
+                "author": clean_title(item.get("bloggername", "")) or None,
+                "rating": None,
+                "content": content[:4000],
+                "source_url": source_url,
+                "source_kind": "naver_blog_excerpt",
+                "reviewed_at": item.get("postdate"),
+            }
+        )
+    return reviews
+
+
+def _walk_json_nodes(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for child in value.values():
+            yield from _walk_json_nodes(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_json_nodes(child)
 
 
 def _detail_image_score(url: str, width: int, height: int) -> int:

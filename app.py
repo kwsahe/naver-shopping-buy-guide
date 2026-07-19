@@ -368,12 +368,31 @@ def create_app() -> Flask:
             return jsonify({"collected_product_ids": product_ids})
         prices = collect_prices_for_all_products()
         cosmetic_products = collect_cosmetic_catalog()
+        collection_summary = db.get_collection_summary(
+            [product["id"] for product in cosmetic_products]
+        )
+        target_per_category = 100
+        required_categories = ("화장품", "클렌징폼", "로션")
+        target_met = all(
+            collection_summary["category_counts"].get(category, 0) >= target_per_category
+            for category in required_categories
+        )
         analysis.recompute_category_recommendations()
         return jsonify(
             {
                 "prices": prices,
                 "hot_products": cosmetic_products[:8],
                 "collected_count": len(cosmetic_products),
+                "price_segments": collection_summary["price_segments"],
+                "category_counts": collection_summary["category_counts"],
+                "review_count": collection_summary["review_count"],
+                "target_per_category": target_per_category,
+                "target_met": target_met,
+                "review_collection": (
+                    "public_product_data_or_naver_blog_excerpts"
+                    if collection_summary["review_count"]
+                    else "no_public_reviews_found"
+                ),
             }
         )
 

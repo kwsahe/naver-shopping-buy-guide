@@ -145,3 +145,35 @@ def test_search_no_delay_badge_rendering(tmp_path, monkeypatch) -> None:
     assert response.status_code == 200
     html = response.get_data(as_text=True)
     assert "응답 지연 감지" not in html
+
+
+def test_collect_response_reports_verified_catalog_targets(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    import app
+
+    products = [{"id": product_id} for product_id in range(1, 7)]
+    monkeypatch.setattr(app, "collect_prices_for_all_products", lambda: [])
+    monkeypatch.setattr(app, "collect_cosmetic_catalog", lambda: products)
+    monkeypatch.setattr(
+        app.db,
+        "get_collection_summary",
+        lambda product_ids: {
+            "price_segments": {"고가": 100, "저가": 100, "검색 상위": 100},
+            "category_counts": {"화장품": 100, "클렌징폼": 101, "로션": 102},
+            "review_count": 12,
+        },
+    )
+    monkeypatch.setattr(
+        app.analysis,
+        "recompute_category_recommendations",
+        lambda: None,
+    )
+
+    response = client.post("/api/collect")
+    body = response.get_json()
+
+    assert response.status_code == 200
+    assert body["target_met"] is True
+    assert body["target_per_category"] == 100
+    assert body["review_count"] == 12
+    assert body["review_collection"] == "public_product_data_or_naver_blog_excerpts"
