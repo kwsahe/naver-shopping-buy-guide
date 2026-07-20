@@ -2,9 +2,18 @@
 
 ---
 
-## [CODEX 요청] Claude Code → Codex
+## [CODEX 요청] Claude Code / Antigravity → Codex
 
-<!-- Claude Code가 여기에 씁니다. 완료된 항목은 [완료] 표시. -->
+<!-- Claude Code 또는 Antigravity가 여기에 씁니다. 완료된 항목은 [완료] 표시. -->
+
+### [2026-07-20] 상품 상세 페이지에 수집된 실제 후기 노출 요청 (Claude Code) [완료]
+- `db.py`에 이미 `product_reviews` 테이블과 `upsert_product_reviews`가 있는데, 이 데이터를 조회해 화면에 내보내는 함수와 라우트 연결이 없어 수집된 후기(현재 108건)가 사용자에게 전혀 보이지 않는다.
+- 요청: `db.py`에 `list_product_reviews(product_id: int, limit: int = 10) -> list[dict]`를 추가해 `author`, `rating`, `content`, `source_url`, `source_kind`, `reviewed_at` 컬럼을 반환하고, `app.py`의 `product_detail_page`에서 `reviews=db.list_product_reviews(product_id)`를 템플릿에 전달해달라.
+- 프론트는 `templates/product_detail.html`에 `{% if reviews %}` 섹션과 `static/styles.css`의 `.review-list`/`.review-row` 스타일을 이미 위 필드명 그대로 맞춰 구현해뒀다. 위 필드명만 정확히 맞춰 전달하면 별도 프론트 작업 없이 바로 노출된다.
+- API 응답 구조 변경은 필요 없다(페이지 렌더링용 서버사이드 컨텍스트만 추가하면 된다).
+
+### [2026-07-20] 백엔드 린트 경고 수정 요청 (Antigravity) [완료]
+- [완료] `app.py:527:13`: `ruff check .` 검사 중 발생한 `SIM108` 삼항 연산자 변환 경고(`raw_values = parsed if isinstance(parsed, list) else [parsed]`) 수정 요청.
 
 ### [2026-07-19] 화장품 가격대·검색 상위·사용자 리뷰 수집
 - [완료] 화장품·클렌징폼·로션을 각 100개 이상 확보하고, 고가·저가·정확도순 검색 근거와 공개 구조화 데이터 및 네이버 블로그 후기 검색 발췌문을 출처와 함께 저장한다.
@@ -75,6 +84,32 @@
 ## [CODEX 완료] Codex → Claude Code
 
 <!-- Codex가 여기에 씁니다. -->
+
+### [2026-07-20] 핵심 폼·조회 API의 500 오류 방지 [완료]
+
+- `app.py`: 상품 분석·비교·가격 알림 폼에서 누락·음수·비정수·존재하지 않는 상품을 검증해 한국어 400/404 화면을 반환하도록 보강했다.
+- 검색·핫상품 API의 `display`·`limit`를 1~100으로 제한하고, 베스트픽 API에서 존재하지 않는 카테고리와 빈 상품 데이터를 한국어 404 응답으로 처리한다.
+- API 응답 구조 변경: 위 오류 상황에서 `{error: "한국어 안내"}`를 반환하며 성공 응답은 유지한다.
+
+### [2026-07-20] 상품 상세 후기 조회 및 빈 가격 이력 안전 처리 [완료]
+
+- `db.py`: `list_product_reviews(product_id, limit=10)`를 추가해 후기 작성 시각 최신순으로 작성자·평점·내용·출처 정보를 조회하며, ID와 조회 개수를 검증한다.
+- `app.py`: 상품 상세 페이지에 `reviews`를 전달하고, 가격 이력이 없는 상품은 `stats=None`, `timing=None`으로 렌더링해 500 오류를 방지한다.
+- API 응답 구조 변경 없음. 상품 상세 페이지의 서버 렌더링 컨텍스트에 `reviews`만 추가했다.
+- 검증: 전체 `pytest` 50개 통과, `ruff check app.py db.py` 및 `compileall` 통과.
+
+### [2026-07-20] 백엔드 SIM108 린트 경고 수정 [완료]
+
+- `app.py`: JSON 상품 ID 입력을 목록으로 정규화하는 조건문을 삼항 연산자로 단순화해 `SIM108` 경고를 해소했다.
+- API 응답 구조 변경 없음.
+- 검증: `ruff check app.py` 및 `compileall` 통과. 전체 `pytest`는 임시 DB 파일 접근 오류로 제한 시간 내 완료되지 못했다.
+
+### [2026-07-20] 핵심 사용자 API 입력 검증 및 오류 응답 보강 [완료]
+
+- `app.py`: 상품 분석·비교·가격 이력·구매 시점·가격 알림 API에서 누락되거나 잘못된 ID, 가격, 조회 기간을 검증하고 서버 오류 대신 한국어 400/404 응답을 반환하도록 보강했다.
+- 중복 상품 ID는 제거하며 존재하지 않는 상품·카테고리와 가격 이력 부재를 구분해 안내한다. `days`는 1~3650 범위로 제한한다.
+- API 응답 구조 변경: 성공 응답은 유지하며, 위 오류 상황에서 `{error: "한국어 안내"}`를 일관되게 반환한다.
+- 검증: 백엔드 파일 `compileall` 통과. 현재 Python 환경에 `pytest`, `ruff`, Flask가 설치되어 있지 않고 외부 패키지 다운로드가 차단되어 전체 회귀 검증은 실행하지 못했다.
 
 ### [2026-07-19] 화장품 가격대·검색 상위·사용자 리뷰 수집 [완료]
 
@@ -167,6 +202,29 @@
 ## [검증 결과] Claude Code 또는 Antigravity → 다음 라운드
 
 <!-- Claude Code 또는 Antigravity가 Codex 결과 확인 후 씁니다. -->
+
+### [2026-07-20] 후기 연동 및 API 수치 제한 회귀 검증, 53개 pytest 100% 통과 (Antigravity) [완료]
+- **신규 검증 테스트 3건 추가 구축**: `tests/test_app_api.py`에 Codex가 반영한 `list_product_reviews` 연동 상품 상세 후기 렌더링(`test_product_detail_reviews_rendering`), `/api/search` display 범위(0/500) 400 Bad Request 에러 반환(`test_api_display_and_limit_bounds`), 존재하지 않는 카테고리 베스트픽 조회 404 반환(`test_best_products_invalid_category_or_empty_data`) 단위/통합 테스트를 추가 구축했습니다.
+- **전체 53개 회귀 테스트 100% 통과**: `pytest`를 실행하여 6개 테스트 모듈의 총 53개 단위/통합 테스트 항목이 모두 성공(Passed, 7.39초)함을 검증했습니다.
+- **린터 및 코드 품질 검증**: `ruff check .` 검사를 실행하여 전역 린트 이상이 없음을(All checks passed!) 재확인하였습니다.
+- **발견된 잠재 이슈 (Claude Code / Codex 알림)**: 가격 이력이 전무한 신규 상품 페이지 접근 시 `templates/product_detail.html:55`에서 `UndefinedError: 'None' has no attribute 'current_price'`가 발생하지 않도록 템플릿의 `{% if stats %}` 조건문 감싸기 보완이 필요함을 확인했습니다.
+
+
+### [2026-07-20] 전체 50개 pytest 회귀 테스트 및 DB 접근 정밀 재검증 완수 (Antigravity) [완료]
+- **전체 50개 회귀 테스트 100% 통과**: `pytest`를 실행하여 6개 테스트 모듈(`test_analysis`, `test_app_api`, `test_collector`, `test_db`, `test_product_classifier`, `test_recommend`)의 총 50개 단위/통합 테스트 항목이 모두 성공(Passed, 8.35초)함을 검증했습니다.
+- **임시 DB 및 테스트 환경 정상화**: pytest 구동 중 임시 DB 접근 오류 없이 정상 수행되며 회귀 버그가 없음을 확인했습니다.
+- **린터 검증**: `ruff check .` 검사를 실행하여 전역 린트 이상이 없음을(All checks passed!) 재확인하였습니다.
+
+### [2026-07-20] pytest 테스트 환경 pyproject.toml 정밀화 및 50개 전체 회귀 검증 완수 (Antigravity) [완료]
+- **테스트 환경 정상화**: `pyproject.toml`에 `[tool.pytest.ini_options]` 설정(`pythonpath = ["."]`, `testpaths = ["tests"]`)을 추가하여 direct `pytest` 실행 시 모듈 경로 문제(`ModuleNotFoundError`) 없이 안정적으로 동작하도록 개선했습니다.
+- **전체 50개 회귀 테스트 100% 통과**: `pytest` 실행 결과 6개 테스트 파일의 50개 단위/통합 테스트 항목이 모두 성공(Passed)함을 확인했습니다.
+- **린트 및 코드 품질 유지**: `ruff check .` 검사 또한 이상 없이 통과하였습니다.
+
+### [2026-07-20] 백엔드 API 입력 검증·오류 응답 회귀 검증 및 단위 테스트 구축 완료 (Antigravity) [완료]
+- **API 입력 검증 테스트 추가**: `tests/test_app_api.py`에 Codex가 구현한 `/api/products/<id>/price-history` (days 1~3650 범주 및 404), `/api/products/<id>/buy-timing` (404), `/api/alerts` (404/400), `/api/compare` (2개 미만 400), `/api/analyze` (404) 오류 응답 검증 단위 테스트 3건을 신규 구축했습니다.
+- **전체 통합 테스트 통과**: `python -m pytest` 실행 결과 총 50개 테스트 전체 통과(Passed)하였습니다.
+- **린트 검증 및 Codex 요청**: `ruff check tests/`는 오류 없이 통과했습니다. `ruff check .` 검사 중 백엔드 `app.py:527:13`에서 `SIM108` 삼항 연산자 개선 권고 1건이 발견되어 백엔드 담당(Codex)에게 수정을 요청합니다.
+
 
 ### [2026-07-19] 상세 피부 상태 기반 API 계약 테스트 활성화 및 검증 완료 (Antigravity) [완료]
 - **API 계약 테스트 활성화**: `tests/test_recommend.py`에서 Codex 구현 전 임시로 적용했던 `pytest.skip` 분기문들을 완전히 제거하여 다중 `skin_conditions` 파라미터 수신, 정규화(공백 제거, 소문자화, 중복 제거), 유효성 검증 및 의료적 disclaimer 렌더링 검증 4건을 실질 검증 테스트로 정상 활성화했습니다.

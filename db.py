@@ -691,6 +691,30 @@ def upsert_product_reviews(product_id: int, reviews: list[dict[str, Any]]) -> in
         return conn.total_changes - before
 
 
+def list_product_reviews(product_id: int, limit: int = 10) -> list[dict[str, Any]]:
+    if not isinstance(product_id, int) or isinstance(product_id, bool) or product_id < 1:
+        raise ValueError("product_id는 1 이상의 정수여야 합니다.")
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+        raise ValueError("limit는 1 이상 100 이하의 정수여야 합니다.")
+
+    with connect_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT author, rating, content, source_url, source_kind, reviewed_at
+            FROM product_reviews
+            WHERE product_id = ?
+            ORDER BY
+                CASE WHEN reviewed_at IS NULL OR reviewed_at = '' THEN 1 ELSE 0 END,
+                reviewed_at DESC,
+                collected_at DESC,
+                id DESC
+            LIMIT ?
+            """,
+            (product_id, limit),
+        ).fetchall()
+        return rows_to_dicts(rows)
+
+
 def get_collection_summary(product_ids: list[int] | None = None) -> dict[str, Any]:
     if product_ids == []:
         return {"price_segments": {}, "category_counts": {}, "review_count": 0}
@@ -788,10 +812,14 @@ def upsert_product_from_naver(category_id: int, item: dict[str, Any]) -> int:
             ),
         ).fetchone()
         product_id = int(row["id"])
-        if item.get("lprice"):
+        try:
+            price = int(item.get("lprice") or 0)
+        except (TypeError, ValueError):
+            price = 0
+        if price > 0:
             conn.execute(
                 "INSERT INTO price_history (product_id, price) VALUES (?, ?)",
-                (product_id, int(item["lprice"])),
+                (product_id, price),
             )
     upsert_product_reviews(product_id, item.get("reviews") or [])
     return product_id

@@ -91,9 +91,18 @@ def create_app() -> Flask:
 
     @app.route("/analyze", methods=["POST"])
     def analyze_form():
-        product_id = request.form.get("product_id", type=int)
-        if not product_id:
-            return redirect(url_for("index"))
+        try:
+            product_id = _parse_positive_int(request.form.get("product_id"), "product_id")
+        except ValueError:
+            return render_template(
+                "not_found.html",
+                message="분석할 상품을 올바르게 선택해 주세요.",
+            ), 400
+        if not db.get_product(product_id):
+            return render_template(
+                "not_found.html",
+                message="분석할 상품을 찾을 수 없습니다.",
+            ), 404
         result = _create_analysis_report(product_id)
         return redirect(url_for("analysis_page", report_id=result["report_id"]))
 
@@ -125,9 +134,10 @@ def create_app() -> Flask:
         if not product:
             return render_template("not_found.html", message="상품을 찾을 수 없습니다."), 404
         history = db.get_price_history(product_id, days=90)
-        stats = analysis.compute_price_stats(product_id, days=90)
-        timing = analysis.buy_timing_from_stats(stats)
+        stats = analysis.compute_price_stats(product_id, days=90) if history else None
+        timing = analysis.buy_timing_from_stats(stats) if stats else None
         alerts = db.list_alerts(limit=20, product_id=product_id)
+        reviews = db.list_product_reviews(product_id)
         return render_template(
             "product_detail.html",
             product=product,
@@ -135,6 +145,7 @@ def create_app() -> Flask:
             stats=stats,
             timing=timing,
             alerts=alerts,
+            reviews=reviews,
         )
 
     @app.route("/reports/<int:report_id>")
@@ -173,10 +184,18 @@ def create_app() -> Flask:
         query = request.args.get("q", "").strip()
         if not query:
             return jsonify({"error": "검색어 q가 필요합니다."}), 400
+        try:
+            display = _parse_bounded_int(
+                request.args.get("display", 20),
+                "display",
+                maximum=100,
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         started_at = perf_counter()
         search_meta = collect_products_for_search(
             query,
-            display=request.args.get("display", 20, type=int),
+            display=display,
             include_accessories=request.args.get("include_accessories") == "1",
         )
         products = [
@@ -194,14 +213,24 @@ def create_app() -> Flask:
 
     @app.route("/api/hot-products")
     def api_hot_products():
+        try:
+            limit = _parse_bounded_int(
+                request.args.get("limit", 8),
+                "limit",
+                maximum=100,
+            )
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
         refresh = request.args.get("refresh") == "1"
         if refresh:
             collect_hot_products()
-        return jsonify({"products": db.list_hot_products(limit=request.args.get("limit", 8, type=int))})
+        return jsonify({"products": db.list_hot_products(limit=limit)})
 
     @app.route("/api/recommend", methods=["GET", "POST"])
     def api_recommend():
         payload = request.args if request.method == "GET" else (request.get_json(silent=True) or request.form)
+        if not hasattr(payload, "get"):
+            return jsonify({"error": "요청 본문은 객체 형식이어야 합니다."}), 400
         skin_type = str(payload.get("skin_type") or "").strip().lower() or None
         hair_type = str(payload.get("hair_type") or "").strip().lower() or None
         try:
@@ -245,26 +274,55 @@ def create_app() -> Flask:
     @app.route("/api/analyze", methods=["POST"])
     def api_analyze():
         payload = request.get_json(silent=True) or request.form
-        product_id = int(payload["product_id"])
+        if not hasattr(payload, "get"):
+            return jsonify({"error": "요청 본문은 객체 형식이어야 합니다."}), 400
+        try:
+            product_id = _parse_positive_int(payload.get("product_id"), "product_id")
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if not db.get_product(product_id):
+            return jsonify({"error": "분석할 상품을 찾을 수 없습니다."}), 404
         return jsonify(_create_analysis_report(product_id))
 
     @app.route("/api/products/<int:product_id>/price-history")
     def api_price_history(product_id: int):
-        days = request.args.get("days", default=90, type=int)
+        try:
+            days = _parse_days(request.args.get("days", 90))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if not db.get_product(product_id):
+            return jsonify({"error": "상품을 찾을 수 없습니다."}), 404
         return jsonify(db.get_price_history(product_id, days=days))
 
     @app.route("/api/compare", methods=["POST"])
     def api_compare():
         payload = request.get_json(silent=True) or request.form.to_dict(flat=False)
-        product_ids = _coerce_product_ids(payload.get("product_ids") or payload.get("product_ids[]"))
+        if not hasattr(payload, "get"):
+            return jsonify({"error": "요청 본문은 객체 형식이어야 합니다."}), 400
+        try:
+            product_ids = _coerce_product_ids(
+                payload.get("product_ids") or payload.get("product_ids[]")
+            )
+        except (TypeError, ValueError):
+            return jsonify({"error": "product_ids는 상품 ID 정수 목록이어야 합니다."}), 400
         if not product_ids and payload.get("category_id"):
-            category_id = int(_first(payload["category_id"]))
+            try:
+                category_id = _parse_positive_int(
+                    _first(payload["category_id"]), "category_id"
+                )
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
+            if not db.get_category(category_id):
+                return jsonify({"error": "카테고리를 찾을 수 없습니다."}), 404
             product_ids = [product["id"] for product in db.get_products(category_id)[:3]]
         if len(product_ids) < 2:
             return jsonify({"error": "비교할 상품을 2개 이상 선택하세요."}), 400
 
         user_priority = _first(payload.get("user_priority")) or None
-        compare_input = analysis.build_compare_payload(product_ids, user_priority)
+        try:
+            compare_input = analysis.build_compare_payload(product_ids, user_priority)
+        except ValueError:
+            return jsonify({"error": "비교할 상품 중 찾을 수 없는 상품이 있습니다."}), 404
         result = run_llm_task("compare", compare_input, persist=True)
         return jsonify(result)
 
@@ -282,23 +340,41 @@ def create_app() -> Flask:
                 else url_for("index", error="select_more")
             )
             return redirect(target)
-        compare_input = analysis.build_compare_payload(
-            product_ids,
-            request.form.get("user_priority") or None,
-        )
+        try:
+            compare_input = analysis.build_compare_payload(
+                product_ids,
+                request.form.get("user_priority") or None,
+            )
+        except ValueError:
+            return render_template(
+                "not_found.html",
+                message="비교할 상품 중 찾을 수 없는 상품이 있습니다.",
+            ), 404
         result = run_llm_task("compare", compare_input, persist=True)
         return redirect(url_for("report_page", report_id=result["report_id"]))
 
     @app.route("/api/products/<int:product_id>/buy-timing")
     def api_buy_timing(product_id: int):
-        days = request.args.get("days", default=90, type=int)
-        stats = analysis.compute_price_stats(product_id, days=days)
+        try:
+            days = _parse_days(request.args.get("days", 90))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if not db.get_product(product_id):
+            return jsonify({"error": "상품을 찾을 수 없습니다."}), 404
+        try:
+            stats = analysis.compute_price_stats(product_id, days=days)
+        except ValueError:
+            return jsonify({"error": "선택한 기간에 가격 이력이 없습니다."}), 404
         result = run_llm_task("buy_timing", stats, persist=False)
         return jsonify({"stats": stats, "timing": result})
 
     @app.route("/api/categories/<int:category_id>/best-picks")
     def api_best_picks(category_id: int):
+        if not db.get_category(category_id):
+            return jsonify({"error": "카테고리를 찾을 수 없습니다."}), 404
         scores = analysis.compute_category_scores(category_id)
+        if not scores["products"]:
+            return jsonify({"error": "추천할 상품 데이터가 없습니다."}), 404
         result = run_llm_task("best_pick", scores, persist=True)
         recommendation = db.get_category_recommendation(category_id)
         return jsonify({"scores": scores, "recommendation": recommendation, "reason": result})
@@ -306,16 +382,34 @@ def create_app() -> Flask:
     @app.route("/api/alerts", methods=["POST"])
     def api_alerts():
         payload = request.get_json(silent=True) or request.form
-        product_id = int(payload["product_id"])
-        target_price = int(payload["target_price"])
+        if not hasattr(payload, "get"):
+            return jsonify({"error": "요청 본문은 객체 형식이어야 합니다."}), 400
+        try:
+            product_id = _parse_positive_int(payload.get("product_id"), "product_id")
+            target_price = _parse_positive_int(payload.get("target_price"), "target_price")
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if not db.get_product(product_id):
+            return jsonify({"error": "가격 알림을 등록할 상품을 찾을 수 없습니다."}), 404
         alert_id = db.create_alert(product_id, target_price)
         return jsonify({"id": alert_id, "product_id": product_id, "target_price": target_price}), 201
 
     @app.route("/alerts", methods=["POST"])
     def alert_form():
         payload = request.form
-        product_id = int(payload["product_id"])
-        target_price = int(payload["target_price"])
+        try:
+            product_id = _parse_positive_int(payload.get("product_id"), "product_id")
+            target_price = _parse_positive_int(payload.get("target_price"), "target_price")
+        except ValueError:
+            return render_template(
+                "not_found.html",
+                message="상품과 목표 가격을 올바르게 입력해 주세요.",
+            ), 400
+        if not db.get_product(product_id):
+            return render_template(
+                "not_found.html",
+                message="가격 알림을 등록할 상품을 찾을 수 없습니다.",
+            ), 404
         db.create_alert(product_id, target_price)
         return redirect(url_for("product_detail_page", product_id=product_id))
 
@@ -472,24 +566,53 @@ def _create_analysis_report(product_id: int) -> dict[str, Any]:
 
 
 def _coerce_product_ids(value: Any) -> list[int]:
+    raw_values: list[Any]
     if value is None:
         return []
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
-            if isinstance(parsed, list):
-                return [int(item) for item in parsed]
+            raw_values = parsed if isinstance(parsed, list) else [parsed]
         except json.JSONDecodeError:
-            return [int(part) for part in value.split(",") if part.strip()]
-    if isinstance(value, list):
-        return [int(_first(item)) for item in value if str(_first(item)).strip()]
-    return [int(value)]
+            raw_values = [part for part in value.split(",") if part.strip()]
+    elif isinstance(value, list):
+        raw_values = [_first(item) for item in value if str(_first(item)).strip()]
+    else:
+        raw_values = [value]
+
+    product_ids: list[int] = []
+    for raw_value in raw_values:
+        product_id = _parse_positive_int(raw_value, "product_ids")
+        if product_id not in product_ids:
+            product_ids.append(product_id)
+    return product_ids
 
 
 def _first(value: Any) -> Any:
     if isinstance(value, list):
         return value[0] if value else None
     return value
+
+
+def _parse_positive_int(value: Any, field_name: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{field_name}는 1 이상의 정수여야 합니다.") from None
+    if parsed < 1:
+        raise ValueError(f"{field_name}는 1 이상의 정수여야 합니다.")
+    return parsed
+
+
+def _parse_days(value: Any) -> int:
+    return _parse_bounded_int(value, "days", maximum=3650)
+
+
+def _parse_bounded_int(value: Any, field_name: str, *, maximum: int) -> int:
+    parsed = _parse_positive_int(value, field_name)
+    if parsed > maximum:
+        raise ValueError(f"{field_name}는 1 이상 {maximum} 이하의 정수여야 합니다.")
+    return parsed
 
 
 def _parse_skin_conditions(payload: Any) -> list[str]:

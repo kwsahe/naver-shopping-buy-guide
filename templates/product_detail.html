@@ -52,9 +52,17 @@
         <p class="eyebrow">Price</p>
         <h2>최근 90일 가격 추이</h2>
       </div>
+      {% if stats %}
       <strong>{{ stats.current_price|money }}</strong>
+      {% else %}
+      <strong class="muted">가격 정보 없음</strong>
+      {% endif %}
     </div>
+    {% if history %}
     <canvas id="priceChart" height="120" data-history='{{ history|json_attr }}'></canvas>
+    {% else %}
+    <p class="muted">아직 수집된 가격 이력이 없습니다. 데이터가 쌓이면 추이가 표시됩니다.</p>
+    {% endif %}
   </div>
 
   <div class="panel">
@@ -63,8 +71,11 @@
         <p class="eyebrow">Timing</p>
         <h2>매수 타이밍</h2>
       </div>
+      {% if timing %}
       <span class="badge">{{ timing.verdict }}</span>
+      {% endif %}
     </div>
+    {% if timing and stats %}
     <p>{{ timing.reason }}</p>
     <dl class="stat-list">
       <div><dt>최저가</dt><dd>{{ stats.min_price|money }}</dd></div>
@@ -76,6 +87,9 @@
       <button class="ghost-button" data-feedback data-target-type="buy_timing" data-target-id="{{ product.id }}" data-helpful="true">도움됐어요 👍</button>
       <button class="ghost-button" data-feedback data-target-type="buy_timing" data-target-id="{{ product.id }}" data-helpful="false">아니요 👎</button>
     </div>
+    {% else %}
+    <p class="muted">가격 이력이 충분하지 않아 매수 타이밍을 분석할 수 없습니다.</p>
+    {% endif %}
   </div>
 
   <div class="panel">
@@ -88,8 +102,10 @@
     <form class="query-form" method="post" action="{{ url_for('alert_form') }}">
       <input type="hidden" name="product_id" value="{{ product.id }}">
       <label class="field-label" for="target_price">목표가</label>
-      <input class="input" id="target_price" name="target_price" type="number" min="1" step="100" value="{{ stats.current_price }}" required>
+      <input class="input" id="target_price" name="target_price" type="number" min="1" step="100" {% if stats %}value="{{ stats.current_price }}"{% endif %} required>
+      {% if stats %}
       <div id="price-warning" class="muted" style="margin-top:-6px; font-size:12px; display:none; color:var(--coral);">현재 최저가({{ stats.current_price|money }}) 이상으로 설정하면 즉시 발동될 수 있습니다.</div>
+      {% endif %}
       <button class="primary-action" type="submit">
         <i data-lucide="bell"></i>
         <span>알림 등록</span>
@@ -145,4 +161,38 @@
     {% endfor %}
   </div>
 </section>
+
+{% if reviews %}
+<section class="panel">
+  <div class="section-title">
+    <div>
+      <p class="eyebrow">Reviews</p>
+      <h2>실제 구매자 후기</h2>
+      <p class="muted">네이버 상품 상세정보 또는 공개 블로그에서 수집한 후기 발췌문입니다. 출처를 함께 표기합니다.</p>
+    </div>
+  </div>
+  <div class="review-list">
+    {% for review in reviews %}
+    <article class="review-row">
+      <div class="review-row-head">
+        <span class="review-author">{{ review.author or "익명" }}</span>
+        {% if review.rating %}
+        <span class="badge">평점 {{ review.rating }}</span>
+        {% endif %}
+        <span class="review-source">
+          {% if review.source_kind == "structured_product_page" %}네이버 상품 상세정보{% elif review.source_kind == "naver_blog_excerpt" %}네이버 블로그 발췌{% else %}{{ review.source_kind or "출처 미상" }}{% endif %}
+        </span>
+      </div>
+      <p class="review-content">{{ review.content }}</p>
+      <div class="review-row-foot">
+        {% if review.reviewed_at %}<span>{{ review.reviewed_at }}</span>{% endif %}
+        {% if review.source_url %}
+        <a href="{{ review.source_url }}" target="_blank" rel="noreferrer">원문 보기</a>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 {% endblock %}

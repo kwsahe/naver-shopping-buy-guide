@@ -865,6 +865,55 @@ textarea {
   margin-top: 16px;
 }
 
+.review-list {
+  display: grid;
+  gap: 12px;
+}
+
+.review-row {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.review-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.review-author {
+  font-weight: 600;
+}
+
+.review-source {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.review-content {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.review-row-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.review-row-foot a {
+  color: var(--green);
+}
+
 .alert-row {
   display: flex;
   align-items: center;
